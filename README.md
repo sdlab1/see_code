@@ -26,9 +26,15 @@ pkg install freetype mesa cmake make clang git
 
 ## Installation
 
-1. Clone or download this repository.
-2. Navigate to the project root directory.
-3. Make the installation script executable and run it:
+Clone or download this repository.
+```bash
+git clone https://github.com/sdlab1/see_code
+```
+Navigate to the project root directory.
+```bash
+see_code && cd see_code
+```
+Make the installation script executable and run it:
 ```bash
 chmod +x scripts/install.sh
 ./scripts/install.sh
