@@ -17,11 +17,11 @@ Interactive Git Diff Viewer for Termux using GLES2 or Termux-GUI as a fallback.
 - **Termux:GUI** application installed (from F-Droid or GitHub).
 - Required packages: `freetype`, `mesa`.
 - `git` installed in Termux.
-- `cmake`, `make`, `gcc` for building.
+- `cmake`, `make`, `clang` for building.
 ```
 Install required packages:
 ```bash
-pkg install freetype mesa cmake make gcc git
+pkg install freetype mesa cmake make clang git
 ```
 
 ## Installation
