@@ -50,7 +50,8 @@ check_build_deps() {
 
 check_runtime_packages() {
     # Remove cjson from required packages
-    local required_packages=("freetype" "mesa" "termux-gui-c") # termux-gui-c is for fallback
+    # Remove explicit check for Termux:GUI app directory
+    local required_packages=("freetype" "mesa" "termux-gui-c") # termux-gui-c library is for fallback
     local missing_packages=()
     for pkg in "${required_packages[@]}"; do
         if ! dpkg -l | grep -q "^ii  $pkg "; then
@@ -67,15 +68,7 @@ check_runtime_packages() {
     fi
 }
 
-check_termux_gui_app() {
-    if [[ ! -d "/data/data/com.termux.gui" ]]; then
-        print_status "ERROR" "Termux:GUI app is not installed."
-        echo "Please install it from F-Droid or GitHub releases."
-        echo "URL: https://github.com/termux/termux-gui/releases"
-        exit 1
-    fi
-    print_status "OK" "Termux:GUI app detected."
-}
+# --- REMOVED FUNCTION: check_termux_gui_app ---
 
 # --- Build and Install ---
 build_project() {
@@ -172,8 +165,8 @@ main() {
     check_termux
     check_build_deps # This no longer checks for cjson
 
-    check_runtime_packages # This no longer tries to install cjson
-    check_termux_gui_app
+    check_runtime_packages # This no longer tries to install cjson or check for GUI app dir
+    # check_termux_gui_app # REMOVED
     if ! build_project; then
         print_status "ERROR" "Build failed. Check the output above."
         exit 1
