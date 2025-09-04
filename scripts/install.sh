@@ -1,11 +1,14 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
-set -e
+# scripts/install.sh
+set -e # Exit immediately if a command exits with a non-zero status.
 
+# --- Configuration ---
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 NVIM_CONFIG_DIR="${HOME}/.config/nvim"
 
+# --- Logging Functions ---
 print_status() {
     local status=$1
     local message=$2
@@ -18,6 +21,7 @@ print_status() {
     esac
 }
 
+# --- Dependency Checks ---
 check_termux() {
     if [[ ! -d "/data/data/com.termux" ]]; then
         print_status "ERROR" "This script must be run inside Termux."
@@ -26,9 +30,10 @@ check_termux() {
     print_status "OK" "Running in Termux environment."
 }
 
-# --- CHANGED: Simplified build deps check, removed cjson/lua checks ---
 check_build_deps() {
     local missing=()
+    # Use clang instead of gcc, as it's standard in Termux
+    # Remove cjson check
     for dep in clang make cmake pkg-config git; do
         if ! command -v "$dep" &> /dev/null; then
             missing+=("$dep")
@@ -39,13 +44,13 @@ check_build_deps() {
         echo "Attempting to install them..."
         pkg install "${missing[@]}" -y || { print_status "ERROR" "Failed to install build dependencies."; exit 1; }
     fi
-    print_status "OK" "Build dependencies found or installed."
+    print_status "OK" "Build dependencies (clang, make, cmake, pkg-config, git) found or installed."
 }
-# --- END CHANGE ---
 
-# --- CHANGED: Removed cjson installation logic ---
+
 check_runtime_packages() {
-    local required_packages=("freetype" "mesa" "termux-gui-c")
+    # Remove cjson from required packages
+    local required_packages=("freetype" "mesa" "termux-gui-c") # termux-gui-c is for fallback
     local missing_packages=()
     for pkg in "${required_packages[@]}"; do
         if ! dpkg -l | grep -q "^ii  $pkg "; then
@@ -61,7 +66,6 @@ check_runtime_packages() {
         print_status "OK" "Required runtime packages are installed."
     fi
 }
-# --- END CHANGE ---
 
 check_termux_gui_app() {
     if [[ ! -d "/data/data/com.termux.gui" ]]; then
@@ -73,6 +77,7 @@ check_termux_gui_app() {
     print_status "OK" "Termux:GUI app detected."
 }
 
+# --- Build and Install ---
 build_project() {
     cd "$PROJECT_ROOT"
     if [[ -d "build" ]]; then
@@ -81,6 +86,8 @@ build_project() {
     fi
     print_status "INFO" "Creating build directory and running CMake."
     mkdir build && cd build
+    # Pass the install prefix to CMake
+    # Use clang explicitly
     if cmake .. -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" -DCMAKE_C_COMPILER=clang; then
         print_status "INFO" "Starting build process with $(nproc) jobs."
         if make -j$(nproc); then
@@ -108,6 +115,7 @@ install_files() {
     fi
 }
 
+# --- Configuration File ---
 create_config_example() {
     local config_example_dir="$NVIM_CONFIG_DIR"
     local config_example_file="$config_example_dir/see_code_config.lua.example"
@@ -117,16 +125,37 @@ create_config_example() {
     if [[ ! -f "$config_example_file" ]]; then
         print_status "INFO" "Creating example configuration file."
         cat > "$config_example_file" << 'EOF'
+-- Example see_code Neovim plugin configuration
+-- Save this file as ~/.config/nvim/see_code_config.lua to use it
+
 return {
+    -- Path to the Unix socket used for communication with the see_code GUI app
     socket_path = "/data/data/com.termux/files/usr/tmp/see_code_socket",
+
+    -- Name or full path to the see_code binary
     see_code_binary = "see_code",
+
+    -- Font fallback chain: List of font file paths to try in order
+    -- The application will attempt to use the first available font in this list.
+    -- If none are found, it will try to find *any* usable font on the system.
     font_chain = {
         "/system/fonts/Roboto-Regular.ttf",
         "/system/fonts/DroidSansMono.ttf",
         "/data/data/com.termux/files/usr/share/fonts/liberation/LiberationMono-Regular.ttf"
+        -- Add more paths here if needed
+        -- "/path/to/your/custom/font.ttf",
     },
-    fallback_behavior = "termux_gui",
+
+    -- Fallback behavior when no suitable font is found:
+    -- "fail": Stop and show an error if no font from font_chain or system is found.
+    -- "termux_gui": Use Termux GUI text rendering as a last resort.
+    -- "skip": Skip detailed text rendering (show placeholders).
+    fallback_behavior = "termux_gui", -- Default to termux_gui fallback
+
+    -- Automatically start the see_code server if it's not running when :SeeCodeDiff is called
     auto_start_server = true,
+
+    -- Enable verbose logging in Neovim (for debugging)
     verbose = false
 }
 EOF
@@ -137,10 +166,12 @@ EOF
     fi
 }
 
+# --- Main Execution ---
 main() {
     echo -e "\033[1;36m=== see_code Installation Script ===\033[0m"
     check_termux
     check_build_deps # This no longer checks for cjson
+
     check_runtime_packages # This no longer tries to install cjson
     check_termux_gui_app
     if ! build_project; then
@@ -151,10 +182,10 @@ main() {
         print_status "ERROR" "Installation failed. Check the output above."
         exit 1
     fi
-    create_config_example
+    create_config_example # Create the example config file
     echo -e "\033[0;32m=== Installation Complete ===\033[0m"
     echo "Run 'see_code' to start the GUI application manually."
-    echo "Or use ':SeeCodeDiff' in Neovim."
+    echo "Or use ':SeeCodeDiff' in Neovim (requires the plugin to be loaded)."
     echo "An example configuration file has been placed in your Neovim config directory."
 }
 
