@@ -10,9 +10,9 @@ set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # Добавляем директории для поиска заголовочных файлов
 # ВАЖНО: Указываем путь к src/, так как заголовки там (#include "see_code/core/app.h")
-include_directories(${SRC_DIR}) 
+include_directories(${SRC_DIR})
 
-# --- Содержимое бывшего src/CMakeLists.txt переносится сюда ---
+# --- Все библиотеки и исполняемый файл определяются прямо здесь ---
 
 # Core library
 add_library(see_code_core
@@ -53,7 +53,7 @@ target_link_libraries(see_code_utils
     dl
 )
 
-# --- Конец перенесенного содержимого ---
+# --- Конец определения библиотек ---
 
 # Создаем исполняемый файл
 add_executable(see_code
