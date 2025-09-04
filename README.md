@@ -24,6 +24,29 @@ Install required packages:
 pkg install freetype mesa cmake make clang git
 ```
 
+### How to Manually Install the Termux:GUI Application
+
+The `see_code` plugin requires the **Termux:GUI application** to be installed on your Android device to display the graphical interface. This application **cannot** be installed using the `pkg install` command. You must download and install it manually.
+
+**Steps:**
+
+1.  **Go to the Termux:GUI Releases Page:**
+    Open this link in your browser: [https://github.com/termux/termux-gui/releases](https://github.com/termux/termux-gui/releases).
+
+2.  **Select the Latest Release:**
+    Find the "Latest release" section or choose the most recent version from the list.
+
+3.  **Download the APK File:**
+    Under the "Assets" section of the release, find the file with the `.apk` extension. Usually, a file named something like `universal-release.apk` is suitable for most devices. Click it to start the download to your Android device.
+
+4.  **Install the APK:**
+    *   Open your downloads folder on your Android device.
+    *   Locate the downloaded `.apk` file.
+    *   Tap on it. Your Android security settings might warn you about installing from an unknown source. Allow installation from your browser or download manager if prompted.
+    *   Follow the on-screen instructions to complete the installation.
+
+Once the Termux:GUI application is successfully installed, you can proceed with the `see_code` installation by running the `./scripts/install.sh` script again. The script should now detect the installed application and complete the setup without errors.
+
 ## Installation
 
 Clone or download this repository.
