@@ -6,9 +6,8 @@ add_library(see_code_core
     core/app.c
 )
 target_include_directories(see_code_core PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR} # This is src/
+    ${CMAKE_CURRENT_SOURCE_DIR} # Путь к src/, где лежат see_code/core/*.h
 )
-# No specific libraries needed for core itself
 
 # GUI library
 add_library(see_code_gui
@@ -17,7 +16,7 @@ add_library(see_code_gui
     gui/termux_gui_backend.c
 )
 target_include_directories(see_code_gui PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR} # This is src/
+    ${CMAKE_CURRENT_SOURCE_DIR} # Путь к src/, где лежат see_code/gui/*.h
 )
 target_link_libraries(see_code_gui
     GLESv2
@@ -29,7 +28,10 @@ add_library(see_code_network
     network/socket_server.c
 )
 target_include_directories(see_code_network PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR} # This is src/
+    ${CMAKE_CURRENT_SOURCE_DIR} # Путь к src/, где лежат see_code/network/*.h
+)
+target_link_libraries(see_code_network
+    pthread
 )
 
 # Data library
@@ -37,9 +39,10 @@ add_library(see_code_data
     data/diff_data.c
 )
 target_include_directories(see_code_data PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR} # This is src/
+    ${CMAKE_CURRENT_SOURCE_DIR} # Путь к src/, где лежат see_code/data/*.h
 )
-# No specific external libs for data
+# Убираем линковку с cjson, так как мы от него отказались
+# target_link_libraries(see_code_data cjson)
 
 # Utils library
 add_library(see_code_utils
@@ -47,7 +50,7 @@ add_library(see_code_utils
     utils/deps_check.c
 )
 target_include_directories(see_code_utils PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR} # This is src/
+    ${CMAKE_CURRENT_SOURCE_DIR} # Путь к src/, где лежат see_code/utils/*.h
 )
 target_link_libraries(see_code_utils
     dl
