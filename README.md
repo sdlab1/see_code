@@ -39,7 +39,7 @@ The `see_code` plugin requires the **Termux:GUI application** to be installed on
 3.  **Download the APK File:**
     Under the "Assets" section of the release, find the file with the `.apk` extension. Usually, a file named something like `app-release.apk` is suitable for most devices. Click it to start the download to your Android device.
 
-4.  **Install the APK:**
+4.  **Install the APK (package installer, not termux):**
     *   Open your downloads folder on your Android device.
     *   Locate the downloaded `.apk` file.
     *   Tap on it. Your Android security settings might warn you about installing from an unknown source. Allow installation from your browser or download manager if prompted.
