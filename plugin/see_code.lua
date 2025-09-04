@@ -1,15 +1,16 @@
 -- plugin/see_code.lua
 local M = {}
+-- Убедитесь, что see_code установлен в $PATH
 local socket_path = "/data/data/com.termux/files/usr/tmp/see_code_socket"
+local see_code_binary = "see_code"
 
--- Dependency checking
+-- Проверка зависимостей
 local function check_dependencies()
     if vim.fn.executable('git') == 0 then
         vim.notify("see_code: git is not installed", vim.log.levels.ERROR)
         return false
     end
 
-    -- Check if we're in a git repository
     local git_dir = vim.fn.system("git rev-parse --git-dir 2>/dev/null")
     if vim.v.shell_error ~= 0 then
         vim.notify("see_code: Not in a git repository", vim.log.levels.ERROR)
@@ -19,36 +20,80 @@ local function check_dependencies()
     return true
 end
 
--- Check if GUI is running by attempting to connect to the socket
+-- Проверка, запущен ли GUI, путем подключения к сокету
 local function check_gui_connection()
     local uv = vim.loop
     local pipe = uv.new_pipe()
     if not pipe then
-        vim.notify("see_code: Failed to create pipe", vim.log.levels.ERROR)
         return false
     end
 
     local connected = false
-    -- Use a callback to check connection status
     pipe:connect(socket_path, function(err)
         if not err then
             connected = true
         end
-        -- Close the pipe immediately after checking
         pipe:close()
     end)
 
-    -- Give it a brief moment to attempt the connection
     vim.wait(100, function() return connected end, 10)
 
-    if not connected then
-        vim.notify("see_code: GUI application not running. Please start it first.", vim.log.levels.ERROR)
-        return false
-    end
-    return true
+    return connected
 end
 
--- Parse diff text into a structured format
+-- Запуск сервера see_code
+local function start_gui_server()
+    local uv = vim.loop
+
+    if check_gui_connection() then
+        vim.notify("see_code: Server is already running.", vim.log.levels.INFO)
+        return true
+    end
+
+    vim.notify("see_code: Starting GUI server...", vim.log.levels.INFO)
+
+    local handle, pid_or_err = uv.spawn(see_code_binary, {
+        args = { "--verbose" },
+        stdio = { nil, nil, nil }
+    }, function(code, signal)
+        vim.schedule(function()
+            if code ~= 0 and code ~= nil then
+                vim.notify(string.format("see_code: Server process exited (code: %d, signal: %d)", code or -1, signal or -1), vim.log.levels.WARN)
+            end
+        end)
+    end)
+
+    if not handle then
+        vim.notify("see_code: Failed to spawn server process: " .. tostring(pid_or_err), vim.log.levels.ERROR)
+        return false
+    end
+
+    local started = false
+    for i = 1, 30 do
+        if check_gui_connection() then
+            started = true
+            break
+        end
+        vim.wait(100)
+    end
+
+    if started then
+        vim.notify("see_code: GUI server started successfully (PID: " .. tostring(pid_or_err) .. ").", vim.log.levels.INFO)
+        return true
+    else
+        vim.notify("see_code: GUI server might have started, but connection failed.", vim.log.levels.WARN)
+        vim.wait(500)
+        if check_gui_connection() then
+             vim.notify("see_code: Connection successful after extra wait.", vim.log.levels.INFO)
+             return true
+        else
+             vim.notify("see_code: Could not connect to server after startup.", vim.log.levels.ERROR)
+             return false
+        end
+    end
+end
+
+-- Парсинг diff текста
 local function parse_diff_to_hunks(diff_text)
     if not diff_text or diff_text == "" then
         return {}
@@ -59,42 +104,34 @@ local function parse_diff_to_hunks(diff_text)
     local current_hunk = nil
 
     for line in diff_text:gmatch("[^\r\n]+") do
-        -- New file detection
         local path_a, path_b = line:match("^diff %-\\-git a/(.+) b/(.+)$")
         if path_a or path_b then
-            -- Save previous file and hunk
             if current_file then
                 if current_hunk then
                     table.insert(current_file.hunks, current_hunk)
                 end
                 table.insert(files, current_file)
             end
-            -- Start new file
             current_file = {
                 path = path_b or path_a,
                 hunks = {}
             }
             current_hunk = nil
-        -- Hunk header detection
         elseif line:match("^@%@") and current_file then
             if current_hunk then
                 table.insert(current_file.hunks, current_hunk)
             end
-            -- Start new hunk
             current_hunk = {
                 header = line,
                 lines = {}
             }
-        -- Content lines (only add if we have a current hunk)
         elseif current_hunk then
-            -- Include diff lines (+, -, space) and context
             if line:match("^[+%- ]") or line:match("^\\ No newline") then
                 table.insert(current_hunk.lines, line)
             end
         end
     end
 
-    -- Don't forget the last hunk and file
     if current_hunk and current_file then
         table.insert(current_file.hunks, current_hunk)
     end
@@ -105,13 +142,13 @@ local function parse_diff_to_hunks(diff_text)
     return files
 end
 
--- Send data to the GUI application
+-- Отправка данных в GUI
 local function send_to_gui(data)
     local uv = vim.loop
     local json_str = vim.fn.json_encode(data)
     local json_bytes = string.len(json_str)
 
-    if json_bytes > 50 * 1024 * 1024 then -- 50MB limit from config.h
+    if json_bytes > 50 * 1024 * 1024 then
         vim.notify(string.format("see_code: Data too large (%d bytes).", json_bytes), vim.log.levels.ERROR)
         return false
     end
@@ -129,7 +166,6 @@ local function send_to_gui(data)
             return
         end
 
-        -- Send the JSON data directly (without length prefix for simplicity with current C server)
         pipe:write(json_str, function(err)
             if err then
                 vim.notify("see_code: Failed to send data: " .. tostring(err), vim.log.levels.ERROR)
@@ -143,19 +179,26 @@ local function send_to_gui(data)
     return true
 end
 
--- Main function to collect and send diff
+-- Основная функция отправки diff
 function M.send_diff()
-    -- Pre-flight checks
     if not check_dependencies() then
         return
     end
+
     if not check_gui_connection() then
-        return
+        vim.notify("see_code: GUI server not running, attempting to start...", vim.log.levels.INFO)
+        if not start_gui_server() then
+            vim.notify("see_code: Failed to start GUI server.", vim.log.levels.ERROR)
+            return
+        end
+        if not check_gui_connection() then
+             vim.notify("see_code: Still cannot connect to GUI server after startup attempt.", vim.log.levels.ERROR)
+             return
+        end
     end
 
     vim.notify("see_code: Collecting diff data...", vim.log.levels.INFO)
 
-    -- Get git diff
     local diff_cmd = "git diff --unified=3 --no-color HEAD"
     local diff_output = vim.fn.systemlist(diff_cmd)
 
@@ -171,7 +214,6 @@ function M.send_diff()
         return
     end
 
-    -- Parse diff into structured format
     local parsed_files = parse_diff_to_hunks(diff_text)
 
     if #parsed_files == 0 then
@@ -179,28 +221,30 @@ function M.send_diff()
         return
     end
 
-    -- Create the payload expected by the C application
-    -- The C app expects an array of files directly, not wrapped in a 'files' key
     local payload = parsed_files
 
-    -- Send to GUI
     if send_to_gui(payload) then
         vim.notify(string.format("see_code: Successfully sent %d files with changes", #parsed_files))
     end
 end
 
--- Status check function
+-- Функция проверки статуса
 function M.status()
     print("=== see_code Status ===")
     local deps_ok = check_dependencies()
     print("Dependencies (git, repo): " .. (deps_ok and "OK" or "MISSING"))
     local gui_ok = check_gui_connection()
     print("GUI Connection: " .. (gui_ok and "OK" or "FAILED"))
-    
+
+    local ps_output = vim.fn.system("pgrep -f '^" .. see_code_binary .. "'")
+    local server_running = ps_output and ps_output ~= ""
+    local server_pid = server_running and ps_output:match("%d+") or "N/A"
+    print("Server Process: " .. (server_running and "RUNNING (PID: " .. server_pid .. ")" or "NOT RUNNING"))
+
     local git_status = vim.fn.system("git status --porcelain")
     local has_changes = git_status and git_status ~= ""
     print("Git Changes: " .. (has_changes and "YES" or "NONE"))
-    
+
     if deps_ok and gui_ok then
         print("Status: READY")
     else
@@ -209,29 +253,30 @@ function M.status()
             print("  - Ensure git is installed and you are in a git repo")
         end
         if not gui_ok then
-            print("  - Start the see_code GUI application")
+            if not server_running then
+                print("  - Server is not running. It should start automatically with :SeeCodeDiff.")
+            else
+                print("  - Server is running but not accepting connections. Check logs.")
+            end
         end
     end
 end
 
--- Setup function
+-- Функция установки
 function M.setup()
-    -- Create user commands
     vim.api.nvim_create_user_command('SeeCodeDiff', M.send_diff, {
-        desc = 'Send git diff to see_code GUI'
+        desc = 'Send git diff to see_code GUI (starts server if needed)'
     })
     vim.api.nvim_create_user_command('SeeCodeStatus', M.status, {
         desc = 'Check see_code system status'
     })
 
-    -- Set up a default keymap
     vim.keymap.set('n', '<Leader>sd', M.send_diff, { desc = 'see_code: Send diff' })
     vim.keymap.set('n', '<Leader>ss', M.status, { desc = 'see_code: Check status' })
 
     vim.notify("see_code: Plugin loaded. Use :SeeCodeDiff to send changes.", vim.log.levels.INFO)
 end
 
--- Automatically call setup when the plugin is sourced
 M.setup()
 
 return M
