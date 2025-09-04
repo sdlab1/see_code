@@ -5,10 +5,8 @@ project(see_code C)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Определяем пути к исходникам и заголовочным файлам
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-# Добавляем директории для поиска заголовочных файлов
 include_directories(
     ${SRC_DIR}
     ${SRC_DIR}/core
@@ -18,15 +16,13 @@ include_directories(
     ${SRC_DIR}/utils
 )
 
-# Добавляем поддиректорию src, где находятся CMakeLists.txt для библиотек
 add_subdirectory(src)
 
-# Создаем исполняемый файл
 add_executable(see_code
     src/core/main.c
 )
 
-# Линкуем необходимые библиотеки
+# --- CHANGED: Removed cjson from target_link_libraries ---
 target_link_libraries(see_code
     see_code_core
     see_code_gui
@@ -35,15 +31,13 @@ target_link_libraries(see_code
     see_code_utils
     GLESv2
     EGL
-    cjson
+    # cjson REMOVED
     pthread
-    dl # Для dlopen в deps_check
+    dl # For dlopen in deps_check
 )
+# --- END CHANGE ---
 
-# Устанавливаем исполняемый файл в префикс/bin
 install(TARGETS see_code DESTINATION bin)
-
-# Устанавливаем плагин Neovim
 install(
     FILES plugin/see_code.lua
     DESTINATION share/nvim/site/plugin
