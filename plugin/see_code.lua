@@ -1,6 +1,7 @@
 -- plugin/see_code.lua
 local M = {}
 
+-- Default configuration (no cjson related settings needed)
 local default_config = {
     socket_path = "/data/data/com.termux/files/usr/tmp/see_code_socket",
     see_code_binary = "see_code",
@@ -126,89 +127,38 @@ local function start_gui_server()
     end
 end
 
-local function parse_diff_to_hunks(diff_text)
-    if not diff_text or diff_text == "" then
-        return {}
-    end
+-- --- CHANGED FUNCTION ---
+-- Send raw diff data to the GUI application
+local function send_to_gui(data_buffer)
+    -- data_buffer is expected to be a Lua string containing the raw bytes
+    local data_size = #data_buffer -- Length in bytes
 
-    local files = {}
-    local current_file = nil
-    local current_hunk = nil
-
-    for line in diff_text:gmatch("[^\r\n]+") do
-        local path_a, path_b = line:match("^diff %-\\-git a/(.+) b/(.+)$")
-        if path_a or path_b then
-            if current_file then
-                if current_hunk then
-                    table.insert(current_file.hunks, current_hunk)
-                end
-                table.insert(files, current_file)
-            end
-            current_file = {
-                path = path_b or path_a,
-                hunks = {}
-            }
-            current_hunk = nil
-        elseif line:match("^@%@") and current_file then
-            if current_hunk then
-                table.insert(current_file.hunks, current_hunk)
-            end
-            current_hunk = {
-                header = line,
-                lines = {}
-            }
-        elseif current_hunk then
-            if line:match("^[+%- ]") or line:match("^\\ No newline") then
-                local line_type = "context"
-                if line:sub(1,1) == "+" then
-                    line_type = "add"
-                elseif line:sub(1,1) == "-" then
-                    line_type = "delete"
-                end
-                table.insert(current_hunk.lines, { content = line, type = line_type })
-            end
-        end
-    end
-
-    if current_hunk and current_file then
-        table.insert(current_file.hunks, current_hunk)
-    end
-    if current_file then
-        table.insert(files, current_file)
-    end
-
-    return files
-end
-
-local function send_to_gui(data)
-    local uv = vim.loop
-    local json_str = vim.fn.json_encode(data)
-    local json_bytes = string.len(json_str)
-
-    if json_bytes > 50 * 1024 * 1024 then
-        vim.notify(string.format("see_code: Data too large (%d bytes).", json_bytes), vim.log.levels.ERROR)
+    if data_size > 50 * 1024 * 1024 then -- 50MB limit
+        vim.notify(string.format("see_code: Data too large (%d bytes).", data_size), vim.log.levels.ERROR)
         return false
     end
 
+    local uv = vim.loop
     local pipe = uv.new_pipe()
     if not pipe then
-        vim.notify("see_code: Failed to create pipe.", vim.log.levels.ERROR)
+        vim.notify("see_code: Failed to create pipe for sending data", vim.log.levels.ERROR)
         return false
     end
 
     pipe:connect(get_config("socket_path"), function(err)
         if err then
-            vim.notify("see_code: Failed to connect: " .. tostring(err), vim.log.levels.ERROR)
+            vim.notify("see_code: Failed to connect to GUI: " .. tostring(err), vim.log.levels.ERROR)
             pipe:close()
             return
         end
 
-        pipe:write(json_str, function(err)
+        -- Send the raw data buffer directly
+        pipe:write(data_buffer, function(err)
             if err then
-                vim.notify("see_code: Failed to send: " .. tostring(err), vim.log.levels.ERROR)
+                vim.notify("see_code: Failed to send raw data: " .. tostring(err), vim.log.levels.ERROR)
             else
                 if get_config("verbose") then
-                    vim.notify(string.format("see_code: Sent %d bytes.", json_bytes), vim.log.levels.INFO)
+                    vim.notify(string.format("see_code: Sent %d raw bytes to GUI successfully", data_size), vim.log.levels.INFO)
                 end
             end
             pipe:close()
@@ -217,7 +167,9 @@ local function send_to_gui(data)
 
     return true
 end
+-- --- END CHANGE ---
 
+-- Main function to collect and send diff
 function M.send_diff()
     if not user_config.socket_path then load_user_config() end
 
@@ -246,35 +198,34 @@ function M.send_diff()
         vim.notify("see_code: Collecting diff data...", vim.log.levels.INFO)
     end
 
+    -- --- CHANGED: Get raw diff text ---
     local diff_cmd = "git diff --unified=3 --no-color HEAD"
     local diff_output = vim.fn.systemlist(diff_cmd)
+    -- --- END CHANGE ---
 
     if vim.v.shell_error ~= 0 then
         vim.notify("see_code: Git diff failed.", vim.log.levels.ERROR)
         return
     end
 
+    -- --- CHANGED: Concatenate lines into a single string (raw buffer) ---
     local diff_text = table.concat(diff_output, "\n")
+    -- --- END CHANGE ---
 
     if diff_text == "" or diff_text:match("^%s*$") then
         vim.notify("see_code: No changes detected", vim.log.levels.WARN)
         return
     end
 
-    local parsed_files = parse_diff_to_hunks(diff_text)
-
-    if #parsed_files == 0 then
-        vim.notify("see_code: No valid diff hunks found", vim.log.levels.WARN)
-        return
+    -- --- CHANGED: Send the raw text buffer ---
+    -- The C application now expects raw bytes, not JSON.
+    if send_to_gui(diff_text) then
+        vim.notify(string.format("see_code: Successfully sent %d bytes of raw diff data", #diff_text))
     end
-
-    local payload = parsed_files
-
-    if send_to_gui(payload) then
-        vim.notify(string.format("see_code: Sent %d files with changes", #parsed_files))
-    end
+    -- --- END CHANGE ---
 end
 
+-- Status check function (remains largely the same)
 function M.status()
     if not user_config.socket_path then load_user_config() end
 
