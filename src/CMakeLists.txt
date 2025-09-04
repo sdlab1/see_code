@@ -1,14 +1,14 @@
 # src/CMakeLists.txt
+cmake_minimum_required(VERSION 3.10)
+
 # Core library
 add_library(see_code_core
     core/app.c
-    # config.h is a header file, no .c file to compile
 )
 target_include_directories(see_code_core PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include # If you have an include dir
-    ${CMAKE_CURRENT_SOURCE_DIR} # For relative includes like see_code/core/...
+    ${CMAKE_CURRENT_SOURCE_DIR} # This is src/
 )
-# No specific libraries needed for core itself, it uses others
+# No specific libraries needed for core itself
 
 # GUI library
 add_library(see_code_gui
@@ -17,13 +17,11 @@ add_library(see_code_gui
     gui/termux_gui_backend.c
 )
 target_include_directories(see_code_gui PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR} # This is src/
 )
 target_link_libraries(see_code_gui
     GLESv2
     EGL
-    # freetype if used directly, otherwise rely on app check
 )
 
 # Network library
@@ -31,32 +29,26 @@ add_library(see_code_network
     network/socket_server.c
 )
 target_include_directories(see_code_network PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR} # This is src/
 )
-# No specific external libs for network
 
 # Data library
 add_library(see_code_data
     data/diff_data.c
 )
 target_include_directories(see_code_data PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR} # This is src/
 )
-# --- CHANGED: Removed cjson from target_link_libraries ---
-# target_link_libraries(see_code_data cjson) REMOVED
-# --- END CHANGE ---
+# No specific external libs for data
 
 # Utils library
 add_library(see_code_utils
     utils/logger.c
-    utils/deps_check.c # This file needs updating to remove cjson check
+    utils/deps_check.c
 )
 target_include_directories(see_code_utils PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR} # This is src/
 )
 target_link_libraries(see_code_utils
-    dl # For dlopen in deps_check
+    dl
 )
