@@ -5,10 +5,11 @@
 #include "see_code/network/socket_server.h"
 #include "see_code/data/diff_data.h"
 #include "see_code/utils/logger.h"
-#include "see_code/gui/termux_gui_backend.h" // NEW INCLUDE
+// #include "see_code/gui/termux_gui_backend.h" // Убрано, если не используется напрямую здесь
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+
 typedef struct {
     AppConfig config;
     int running;
@@ -25,21 +26,31 @@ typedef struct {
     float scroll_y;
     int needs_redraw;
 } AppState;
+
 static AppState g_app = {0};
-// Socket callback - called when data is received
-static void on_socket_data(const char* json_data, size_t length) {
-    log_info("Received %zu bytes from Neovim", length);
+
+// --- CHANGED CALLBACK SIGNATURE ---
+// Socket callback - called when raw data is received
+// Now receives raw bytes and length
+static void on_socket_data(const char* data_buffer, size_t length) {
+    log_info("Received %zu raw bytes from Neovim", length);
     pthread_mutex_lock(&g_app.state_mutex);
-    if (diff_data_parse_json(g_app.diff_data, json_data)) {
-        log_info("Successfully parsed diff data");
+
+    // --- CHANGED CALL ---
+    // Instead of parsing JSON, load data from the raw buffer
+    if (diff_data_load_from_buffer(g_app.diff_data, data_buffer, length)) {
+        log_info("Successfully loaded data from raw buffer");
         g_app.needs_redraw = 1;
         // Update UI with new data
         ui_manager_set_diff_data(g_app.ui_manager, g_app.diff_data);
     } else {
-        log_error("Failed to parse JSON data from Neovim");
+        log_error("Failed to load data from raw buffer");
     }
+    // --- END CHANGE ---
     pthread_mutex_unlock(&g_app.state_mutex);
 }
+// --- END CHANGE ---
+
 int app_init(const AppConfig* config) {
     if (!config) {
         log_error("Null configuration provided");
@@ -49,36 +60,40 @@ int app_init(const AppConfig* config) {
         log_warn("Application already initialized");
         return 1;
     }
+
     // Copy configuration
     memcpy(&g_app.config, config, sizeof(AppConfig));
+
     // Initialize threading primitives
     if (pthread_mutex_init(&g_app.state_mutex, NULL) != 0) {
         log_error("Failed to initialize state mutex");
         return 0;
     }
+
     log_info("Initializing application components...");
+
     // Initialize diff data storage
     g_app.diff_data = diff_data_create();
     if (!g_app.diff_data) {
         log_error("Failed to initialize diff data storage");
         goto cleanup;
     }
+
     // Initialize renderer
     g_app.renderer = renderer_create(config->window_width, config->window_height);
     if (!g_app.renderer) {
         log_error("Failed to initialize GLES2 renderer");
-        // --- FALLBACK LOGIC ---
-        if (termux_gui_backend_is_available()) {
-             log_warn("Attempting fallback to Termux GUI renderer");
-             // We need to tell the UI manager to use the Termux GUI backend
-             // This requires a slight change in how components are initialized.
-             // For simplicity here, we assume ui_manager can handle it.
-             // A better approach might be to not create the GLES2 renderer at all
-             // if we know we will fallback, or have a factory.
-        } else {
-            goto cleanup;
-        }
+        // --- FALLBACK LOGIC (пример, если нужно) ---
+        // if (termux_gui_backend_is_available()) {
+        //      log_warn("Attempting fallback to Termux GUI renderer");
+        // } else {
+        //     goto cleanup;
+        // }
+        goto cleanup; // Упрощено для примера
+    } else {
+        log_info("Using GLES2 as primary renderer");
     }
+
 
     // Initialize UI manager
     g_app.ui_manager = ui_manager_create(g_app.renderer);
@@ -86,80 +101,97 @@ int app_init(const AppConfig* config) {
         log_error("Failed to initialize UI manager");
         goto cleanup;
     }
-    
-    // --- APPLY FALLBACK IF NEEDED ---
-    if (!g_app.renderer) {
-         ui_manager_set_renderer_type(g_app.ui_manager, RENDERER_TYPE_TERMUX_GUI);
-         log_info("Using Termux GUI as primary renderer (GLES2 failed)");
-    } else {
-        log_info("Using GLES2 as primary renderer");
-    }
+
+    // --- APPLY FALLBACK IF NEEDED (пример) ---
+    // if (!g_app.renderer) {
+    //     ui_manager_set_renderer_type(g_app.ui_manager, RENDERER_TYPE_TERMUX_GUI);
+    //     log_info("Using Termux GUI as primary renderer (GLES2 failed)");
+    // } else {
+    //    log_info("Using GLES2 as primary renderer");
+    // }
 
     // Initialize socket server
-    g_app.socket_server = socket_server_create(config->socket_path, on_socket_data);
+    g_app.socket_server = socket_server_create(config->socket_path, on_socket_data); // Использует обновленный callback
     if (!g_app.socket_server) {
         log_error("Failed to initialize socket server");
         goto cleanup;
     }
+
     // Start socket server thread
-    if (pthread_create(&g_app.socket_thread, NULL, 
+    if (pthread_create(&g_app.socket_thread, NULL,
                       (void*(*)(void*))socket_server_run, g_app.socket_server) != 0) {
         log_error("Failed to create socket thread");
         goto cleanup;
     }
+
     g_app.running = 1;
     g_app.initialized = 1;
     g_app.needs_redraw = 1;
+
     log_info("Application initialization completed");
     return 1;
+
 cleanup:
     app_cleanup();
     return 0;
 }
+
 int app_update(void) {
     if (!g_app.initialized || !g_app.running) {
         return 0;
     }
+
     pthread_mutex_lock(&g_app.state_mutex);
+
     // Handle renderer updates
     if (!renderer_begin_frame(g_app.renderer)) {
         log_error("Failed to begin renderer frame");
         pthread_mutex_unlock(&g_app.state_mutex);
         return 0;
     }
+
     // Update UI if needed
     if (g_app.needs_redraw) {
         ui_manager_update_layout(g_app.ui_manager, g_app.scroll_y);
         g_app.needs_redraw = 0;
     }
+
     // Render UI
     ui_manager_render(g_app.ui_manager);
+
     // End frame
     if (!renderer_end_frame(g_app.renderer)) {
         log_error("Failed to end renderer frame");
         pthread_mutex_unlock(&g_app.state_mutex);
         return 0;
     }
+
     pthread_mutex_unlock(&g_app.state_mutex);
     return 1;
 }
+
 void app_shutdown(void) {
     log_info("Initiating application shutdown");
     g_app.running = 0;
+
     // Stop socket server
     if (g_app.socket_server) {
         socket_server_stop(g_app.socket_server);
     }
 }
+
 void app_cleanup(void) {
     if (!g_app.initialized) {
         return;
     }
+
     log_info("Cleaning up application resources");
+
     // Wait for socket thread to finish
     if (g_app.socket_thread) {
         pthread_join(g_app.socket_thread, NULL);
     }
+
     // Clean up components
     if (g_app.socket_server) {
         socket_server_destroy(g_app.socket_server);
@@ -177,33 +209,45 @@ void app_cleanup(void) {
         diff_data_destroy(g_app.diff_data);
         g_app.diff_data = NULL;
     }
+
     // Clean up threading
     pthread_mutex_destroy(&g_app.state_mutex);
     g_app.initialized = 0;
     g_app.running = 0;
+
     log_info("Application cleanup completed");
 }
+
 int app_is_running(void) {
     return g_app.running;
 }
+
 const AppConfig* app_get_config(void) {
     return g_app.initialized ? &g_app.config : NULL;
 }
+
 void app_handle_touch(float x, float y) {
     if (!g_app.initialized) return;
+
     pthread_mutex_lock(&g_app.state_mutex);
     log_debug("Touch event at (%.2f, %.2f)", x, y);
+
     // Convert touch coordinates and handle UI interaction
     if (ui_manager_handle_touch(g_app.ui_manager, x, y + g_app.scroll_y)) {
         g_app.needs_redraw = 1;
         log_debug("Touch handled by UI manager");
     }
+
     pthread_mutex_unlock(&g_app.state_mutex);
 }
+
 void app_handle_scroll(float dx, float dy) {
     if (!g_app.initialized) return;
+
     pthread_mutex_lock(&g_app.state_mutex);
+
     g_app.scroll_y += dy * SCROLL_SENSITIVITY;
+
     // Clamp scroll position
     if (g_app.scroll_y < 0) {
         g_app.scroll_y = 0;
@@ -212,20 +256,28 @@ void app_handle_scroll(float dx, float dy) {
     if (max_scroll > 0 && g_app.scroll_y > max_scroll) {
         g_app.scroll_y = max_scroll;
     }
+
     g_app.needs_redraw = 1;
     log_debug("Scroll updated: y=%.2f", g_app.scroll_y);
+
     pthread_mutex_unlock(&g_app.state_mutex);
 }
+
 void app_handle_resize(int width, int height) {
     if (!g_app.initialized) return;
+
     pthread_mutex_lock(&g_app.state_mutex);
+
     log_info("Window resized to %dx%d", width, height);
     g_app.config.window_width = width;
     g_app.config.window_height = height;
+
     // Update renderer
     if (g_app.renderer) {
         renderer_resize(g_app.renderer, width, height);
     }
+
     g_app.needs_redraw = 1;
+
     pthread_mutex_unlock(&g_app.state_mutex);
 }
