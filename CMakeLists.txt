@@ -2,19 +2,30 @@ cmake_minimum_required(VERSION 3.10)
 project(see_code C)
 
 set(CMAKE_C_STANDARD 99)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Add include directories
-include_directories(include)
+# Определяем пути к исходникам и заголовочным файлам
+set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-# Add subdirectories
+# Добавляем директории для поиска заголовочных файлов
+include_directories(
+    ${SRC_DIR}
+    ${SRC_DIR}/core
+    ${SRC_DIR}/data
+    ${SRC_DIR}/gui
+    ${SRC_DIR}/network
+    ${SRC_DIR}/utils
+)
+
+# Добавляем поддиректорию src, где находятся CMakeLists.txt для библиотек
 add_subdirectory(src)
 
-# Create executable
+# Создаем исполняемый файл
 add_executable(see_code
     src/core/main.c
 )
 
-# Link libraries
+# Линкуем необходимые библиотеки
 target_link_libraries(see_code
     see_code_core
     see_code_gui
@@ -25,7 +36,15 @@ target_link_libraries(see_code
     EGL
     cjson
     pthread
+    dl # Для dlopen в deps_check
 )
 
-# Install target
+# Устанавливаем исполняемый файл в префикс/bin
 install(TARGETS see_code DESTINATION bin)
+
+# Устанавливаем плагин Neovim
+install(
+    FILES plugin/see_code.lua
+    DESTINATION share/nvim/site/plugin
+    RENAME see_code.lua
+)
