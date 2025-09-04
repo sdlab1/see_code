@@ -32,7 +32,7 @@ git clone https://github.com/sdlab1/see_code
 ```
 Navigate to the project root directory.
 ```bash
-see_code && cd see_code
+cd see_code
 ```
 Make the installation script executable and run it:
 ```bash
