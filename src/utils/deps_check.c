@@ -91,28 +91,8 @@ int deps_check_freetype(void) {
     return 1;
 }
 
-int deps_check_cjson(void) {
-    void* handle = dlopen("libcjson.so", RTLD_LAZY);
-    if (!handle) {
-        handle = dlopen("libcjson.so.1", RTLD_LAZY); // Try common variant
-        if (!handle) {
-            log_error("cJSON library not found: %s", dlerror());
-            log_error("SOLUTION: Install cJSON: pkg install cjson");
-            return 0;
-        }
-    }
-
-    void* cJSON_Parse = dlsym(handle, "cJSON_Parse");
-    void* cJSON_Delete = dlsym(handle, "cJSON_Delete");
-    if (!cJSON_Parse || !cJSON_Delete) {
-        log_error("Essential cJSON functions not found");
-        dlclose(handle);
-        return 0;
-    }
-    dlclose(handle);
-    log_info("cJSON library: OK");
-    return 1;
-}
+// --- REMOVED FUNCTION: deps_check_cjson ---
+// int deps_check_cjson(void) { ... }
 
 int deps_check_pthread(void) {
     void* handle = dlopen("libpthread.so", RTLD_LAZY);
@@ -135,7 +115,7 @@ int deps_check_pthread(void) {
     return 1;
 }
 
-// --- NEW FUNCTION ---
+// --- NEW FUNCTION (остаётся без изменений, если termux-gui-c всё ещё используется для fallback) ---
 int deps_check_termux_gui_c(void) {
     void* handle = dlopen("libtermux-gui.so", RTLD_LAZY);
     if (!handle) {
@@ -166,7 +146,7 @@ int deps_check_libraries(void) {
     log_info("Checking required libraries...");
     int all_ok = 1;
     if (!deps_check_gles2()) all_ok = 0;
-    if (!deps_check_cjson()) all_ok = 0;
+    // if (!deps_check_cjson()) all_ok = 0; // REMOVED
     if (!deps_check_pthread()) all_ok = 0;
 
     // FreeType is optional (fallback to TrueType/system)
@@ -178,7 +158,6 @@ int deps_check_libraries(void) {
     return all_ok;
 }
 
-// --- UPDATED FUNCTION ---
 int deps_check_fonts(void) {
     log_info("Checking font availability...");
 
@@ -301,7 +280,7 @@ void deps_print_report(void) {
     printf("Environment: %s\n", deps_check_termux_environment() ? "✓ OK" : "✗ FAIL");
     printf("Termux:GUI:  %s\n", deps_check_termux_gui_app() ? "✓ OK" : "✗ FAIL");
     printf("OpenGL ES2:  %s\n", deps_check_gles2() ? "✓ OK" : "✗ FAIL");
-    printf("cJSON:       %s\n", deps_check_cjson() ? "✓ OK" : "✗ FAIL");
+    // printf("cJSON:       %s\n", deps_check_cjson() ? "✓ OK" : "✗ FAIL"); // REMOVED
     printf("pthread:     %s\n", deps_check_pthread() ? "✓ OK" : "✗ FAIL");
     printf("FreeType:    %s\n", deps_check_freetype() ? "✓ OK" : "⚠ WARN");
     // Run font check for report, result is logged inside
@@ -315,8 +294,8 @@ const char* deps_get_missing_solution(const char* component) {
         return "Install graphics libraries: pkg install mesa";
     } else if (strcmp(component, "freetype") == 0) {
         return "Install FreeType: pkg install freetype";
-    } else if (strcmp(component, "cjson") == 0) {
-        return "Install cJSON: pkg install cjson";
+    // } else if (strcmp(component, "cjson") == 0) { // REMOVED
+    //     return "Install cJSON: pkg install cjson";
     } else if (strcmp(component, "termux-gui") == 0) {
         return "Install Termux:GUI from F-Droid or GitHub releases";
     } else if (strcmp(component, "termux-gui-c") == 0) {
