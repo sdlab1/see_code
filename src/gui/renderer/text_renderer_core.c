@@ -84,6 +84,108 @@ static int init_freetype_internal(struct TextRendererInternalData* tr_data, cons
     return 1;
 }
 
+static int load_glyph_into_atlas_internal(struct TextRendererInternalData* tr_data, unsigned long char_code) {
+    if (!tr_data || !tr_data->is_freetype_initialized) {
+        return 0;
+    }
+
+    // Проверяем, есть ли глиф уже в кэше
+    int cache_index = char_code - 32; // ASCII 32-126 -> индексы 0-95
+    if (cache_index < 0 || cache_index >= 96) {
+        log_debug("Character U+%04lX is outside ASCII range 32-126, skipping", char_code);
+        return 0; // Вне диапазона кэша
+    }
+
+    if (tr_data->glyph_cache[cache_index].is_loaded) {
+        return 1; // Уже загружен
+    }
+
+    if (FT_Load_Char(tr_data->ft_face, char_code, FT_LOAD_RENDER)) {
+        log_warn("Failed to load glyph for character U+%04lX", char_code);
+        return 0;
+    }
+
+    FT_GlyphSlot slot = tr_data->ft_face->glyph;
+    int bitmap_width = slot->bitmap.width;
+    int bitmap_rows = slot->bitmap.rows;
+
+    // Найдем место в атласе (простой алгоритм "первое подходящее место")
+    // В реальной реализации лучше использовать более сложные аллокаторы
+    int pen_x = 0, pen_y = 0;
+    int row_height = 0;
+    int found_space = 0;
+
+    // Простой поиск места: идем по строкам
+    for (int y = 0; y < tr_data->atlas_height - bitmap_rows; ) {
+        int max_h_in_row = 0;
+        for (int x = 0; x < tr_data->atlas_width - bitmap_width; ) {
+            // Проверяем, свободно ли место в прямоугольнике (x,y,bitmap_width,bitmap_rows)
+            int is_free = 1;
+            for (int yy = y; yy < y + bitmap_rows && is_free; yy++) {
+                for (int xx = x; xx < x + bitmap_width && is_free; xx++) {
+                    if (tr_data->texture_atlas_data[yy * tr_data->atlas_width + xx] != 0) {
+                        is_free = 0;
+                    }
+                }
+            }
+            if (is_free) {
+                pen_x = x;
+                pen_y = y;
+                found_space = 1;
+                max_h_in_row = bitmap_rows > max_h_in_row ? bitmap_rows : max_h_in_row;
+                break; // Нашли место, выходим из внутреннего цикла
+            } else {
+                // Пропускаем занятую область
+                x += bitmap_width + 1; // Простой сдвиг
+            }
+        }
+        if (found_space) {
+            row_height = max_h_in_row;
+            break; // Нашли место, выходим из внешнего цикла
+        }
+        y += row_height + 1; // Переходим к следующей строке
+        row_height = 0; // Сброс высоты для новой строки
+    }
+
+    if (!found_space) {
+        log_warn("No space left in texture atlas for glyph U+%04lX", char_code);
+        return 0; // Нет места
+    }
+
+    // Копируем битмап глифа в атлас
+    for (int row = 0; row < bitmap_rows; row++) {
+        for (int col = 0; col < bitmap_width; col++) {
+            int atlas_index = (pen_y + row) * tr_data->atlas_width + (pen_x + col);
+            int bitmap_index = row * slot->bitmap.width + col;
+            // Используем альфа-канал
+            tr_data->texture_atlas_data[atlas_index] = slot->bitmap.buffer[bitmap_index];
+        }
+    }
+
+    // Обновляем текстуру OpenGL
+    glBindTexture(GL_TEXTURE_2D, tr_data->texture_atlas_id);
+    // glTexSubImage2D более эффективен, если обновляется только часть
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tr_data->atlas_width, tr_data->atlas_height, GL_ALPHA, GL_UNSIGNED_BYTE, tr_data->texture_atlas_data);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Добавляем глиф в кэш
+    tr_data->glyph_cache[cache_index].unicode_char = char_code;
+    tr_data->glyph_cache[cache_index].u0 = (float)pen_x / tr_data->atlas_width;
+    tr_data->glyph_cache[cache_index].v0 = (float)pen_y / tr_data->atlas_height;
+    tr_data->glyph_cache[cache_index].u1 = (float)(pen_x + bitmap_width) / tr_data->atlas_width;
+    tr_data->glyph_cache[cache_index].v1 = (float)(pen_y + bitmap_rows) / tr_data->atlas_height;
+    tr_data->glyph_cache[cache_index].width = bitmap_width;
+    tr_data->glyph_cache[cache_index].height = bitmap_rows;
+    tr_data->glyph_cache[cache_index].bearing_x = slot->bitmap_left;
+    tr_data->glyph_cache[cache_index].bearing_y = slot->bitmap_top;
+    tr_data->glyph_cache[cache_index].advance_x = slot->advance.x >> 6; // В пикселях
+    tr_data->glyph_cache[cache_index].is_loaded = 1;
+
+    log_debug("Loaded glyph U+%04lX into atlas at (%d,%d)", char_code, pen_x, pen_y);
+    return 1;
+}
+// --- Конец вспомогательных функций FreeType ---
+
 int text_renderer_init(Renderer* renderer, const char* font_path_hint) {
     if (!renderer) return 0;
 
@@ -148,7 +250,7 @@ int text_renderer_init(Renderer* renderer, const char* font_path_hint) {
     // --- Конец попытки инициализации FreeType ---
 
     // Сохраняем указатель на внутренние данные в основном рендерере
-    renderer->text_internal_data_private = tr_data;
+    renderer->text_internal_data_private = tr_data; // Не рекомендуется без модификации struct Renderer
     log_info("Text renderer initialized");
     return 1;
 }
