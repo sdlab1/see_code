@@ -5,10 +5,7 @@
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
+// Forward declaration
 typedef struct GLContext GLContext;
 
 /**
@@ -59,23 +56,20 @@ void gl_context_resize(GLContext* ctx, int width, int height);
 /**
  * @brief Clears the framebuffer with a given color.
  *
+ * @param ctx The GLContext.
  * @param r Red component (0.0 - 1.0).
  * @param g Green component (0.0 - 1.0).
  * @param b Blue component (0.0 - 1.0).
  * @param a Alpha component (0.0 - 1.0).
  */
-void gl_context_clear(float r, float g, float b, float a);
+void gl_context_clear(GLContext* ctx, float r, float g, float b, float a);
 
-// --- Геттеры для внутренних данных, необходимых другим модулям ---
+// --- Getters for internal data, needed by other modules ---
 EGLDisplay gl_context_get_display(const GLContext* ctx);
 EGLSurface gl_context_get_surface(const GLContext* ctx);
 EGLContext gl_context_get_context(const GLContext* ctx);
 int gl_context_get_width(const GLContext* ctx);
 int gl_context_get_height(const GLContext* ctx);
-// --- Конец геттеров ---
-
-#ifdef __cplusplus
-}
-#endif
+// --- End getters ---
 
 #endif // SEE_CODE_GL_CONTEXT_H
