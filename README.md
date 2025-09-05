@@ -45,8 +45,6 @@ The `see_code` plugin requires the **Termux:GUI application** to be installed on
     *   Tap on it. Your Android security settings might warn you about installing from an unknown source. Allow installation from your browser or download manager if prompted.
     *   Follow the on-screen instructions to complete the installation.
 
-Once the Termux:GUI application is successfully installed, you can proceed with the `see_code` installation by running the `./scripts/install.sh` script again. The script should now detect the installed application and complete the setup without errors.
-
 ## Installation
 
 Clone or download this repository.
