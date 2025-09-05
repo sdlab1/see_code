@@ -4,10 +4,6 @@
 
 #include <GLES2/gl2.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /**
  * @brief Compiles a shader object from source code.
  *
@@ -37,15 +33,11 @@ GLuint gl_shaders_create_program(GLuint vertex_shader, GLuint fragment_shader);
  */
 GLuint gl_shaders_create_program_from_sources(const char* vertex_source, const char* fragment_source);
 
-// --- Предопределенные шейдеры ---
+// --- Predefined shaders ---
 extern const char* gl_shaders_textured_vertex_shader_source;
 extern const char* gl_shaders_textured_fragment_shader_source;
 extern const char* gl_shaders_solid_vertex_shader_source;
 extern const char* gl_shaders_solid_fragment_shader_source;
-// --- Конец предопределенных шейдеров ---
-
-#ifdef __cplusplus
-}
-#endif
+// --- End predefined shaders ---
 
 #endif // SEE_CODE_GL_SHADERS_H
