@@ -1,4 +1,4 @@
-// src/gui/renderer/text_renderer_explanation_plug.c
+// src/gui/renderer/freetype_text_renderer_init.c
 #include "see_code/gui/renderer/text_renderer.h"
 #include "see_code/gui/renderer.h"
 #include "see_code/utils/logger.h"
