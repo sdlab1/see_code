@@ -4,10 +4,6 @@
 
 #include <GLES2/gl2.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /**
  * @brief Draws a solid-colored quad using a provided shader program.
  *
@@ -57,9 +53,5 @@ int gl_primitives_draw_textured_quad(GLuint program_id, GLuint texture_id,
                                     float u0, float v0, float u1, float v1,
                                     unsigned int color_rgba,
                                     const float mvp[16], GLuint vbo_id);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // SEE_CODE_GL_PRIMITIVES_H
