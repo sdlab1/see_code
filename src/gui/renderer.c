@@ -12,18 +12,17 @@ struct Renderer {
     int width;
     int height;
     // --- Добавлено для рендеринга текста ---
-    GLuint simple_shader_program;
-    GLuint simple_vbo;
-    GLuint simple_ebo; // Для индексов
-    GLint simple_pos_attrib;
-    GLint simple_color_attrib;
-    GLint simple_mvp_uniform;
+    GLuint shader_program;
+    GLuint vbo;
+    GLint pos_attrib;
+    GLint color_attrib;
+    GLint mvp_uniform;
     // --- Конец добавления ---
 };
 
 // --- Добавлено для рендеринга текста ---
-// Очень простой шейдер для рисования примитивов (квадратов, линий)
-static const char* simple_vertex_shader_source =
+// Шейдер для рисования цветных примитивов
+static const char* vertex_shader_source =
     "attribute vec2 position;\n"
     "attribute vec4 color;\n"
     "varying vec4 frag_color;\n"
@@ -33,7 +32,7 @@ static const char* simple_vertex_shader_source =
     "  frag_color = color;\n"
     "}\n";
 
-static const char* simple_fragment_shader_source =
+static const char* fragment_shader_source =
     "precision mediump float;\n"
     "varying vec4 frag_color;\n"
     "void main() {\n"
@@ -142,7 +141,7 @@ Renderer* renderer_create(int width, int height) {
         return NULL;
     }
 
-    // Create EGL surface (this would typically be provided by Termux:GUI)
+    // Create EGL surface
     renderer->surface = eglCreateWindowSurface(renderer->display, config, NULL, NULL);
     if (renderer->surface == EGL_NO_SURFACE) {
         log_error("Failed to create EGL surface");
@@ -175,21 +174,19 @@ Renderer* renderer_create(int width, int height) {
         return NULL;
     }
 
-    // --- Инициализация ресурсов для рендеринга текста ---
-    renderer->simple_shader_program = create_program(simple_vertex_shader_source, simple_fragment_shader_source);
-    if (!renderer->simple_shader_program) {
-        log_error("Failed to create simple shader program");
-        // Продолжаем, но рендеринг текста не будет работать
+    // --- Инициализация ресурсов для рендеринга примитивов ---
+    renderer->shader_program = create_program(vertex_shader_source, fragment_shader_source);
+    if (!renderer->shader_program) {
+        log_error("Failed to create shader program for primitives");
+        // Продолжаем, но рендеринг текста/примитивов не будет работать
     } else {
-        renderer->simple_pos_attrib = glGetAttribLocation(renderer->simple_shader_program, "position");
-        renderer->simple_color_attrib = glGetAttribLocation(renderer->simple_shader_program, "color");
-        renderer->simple_mvp_uniform = glGetUniformLocation(renderer->simple_shader_program, "mvp");
+        renderer->pos_attrib = glGetAttribLocation(renderer->shader_program, "position");
+        renderer->color_attrib = glGetAttribLocation(renderer->shader_program, "color");
+        renderer->mvp_uniform = glGetUniformLocation(renderer->shader_program, "mvp");
 
-        // Создаем VBO и EBO
-        glGenBuffers(1, &renderer->simple_vbo);
-        glGenBuffers(1, &renderer->simple_ebo);
+        glGenBuffers(1, &renderer->vbo);
     }
-    // --- Конец инициализации ресурсов для рендеринга текста ---
+    // --- Конец инициализации ресурсов ---
 
     log_info("Renderer initialized with GLES2 context");
     return renderer;
@@ -199,10 +196,9 @@ void renderer_destroy(Renderer* renderer) {
     if (!renderer) {
         return;
     }
-    // --- Освобождение ресурсов для рендеринга текста ---
-    if (renderer->simple_shader_program) glDeleteProgram(renderer->simple_shader_program);
-    if (renderer->simple_vbo) glDeleteBuffers(1, &renderer->simple_vbo);
-    if (renderer->simple_ebo) glDeleteBuffers(1, &renderer->simple_ebo);
+    // --- Освобождение ресурсов для рендеринга ---
+    if (renderer->shader_program) glDeleteProgram(renderer->shader_program);
+    if (renderer->vbo) glDeleteBuffers(1, &renderer->vbo);
     // --- Конец освобождения ресурсов ---
 
     if (renderer->display != EGL_NO_DISPLAY) {
@@ -222,7 +218,6 @@ int renderer_begin_frame(Renderer* renderer) {
     if (!renderer) {
         return 0;
     }
-    // Set viewport
     glViewport(0, 0, renderer->width, renderer->height);
     return 1;
 }
@@ -231,7 +226,6 @@ int renderer_end_frame(Renderer* renderer) {
     if (!renderer) {
         return 0;
     }
-    // Swap buffers
     if (!eglSwapBuffers(renderer->display, renderer->surface)) {
         log_error("Failed to swap EGL buffers");
         return 0;
@@ -245,7 +239,6 @@ void renderer_resize(Renderer* renderer, int width, int height) {
     }
     renderer->width = width;
     renderer->height = height;
-    // Update viewport
     glViewport(0, 0, width, height);
 }
 
@@ -256,26 +249,68 @@ void renderer_clear(float r, float g, float b, float a) {
 
 void renderer_draw_quad(float x, float y, float width, float height,
                        float r, float g, float b, float a) {
-    // Simple quad rendering using GLES2
+    if (!renderer || !renderer->shader_program) {
+         // Fallback если шейдер не скомпилировался
+         log_debug("Falling back to glColor for quad");
+         glClearColor(0.0f, 0.0f, 0.0f, 1.0f); // Black background for fallback
+         glClear(GL_COLOR_BUFFER_BIT);
+         glColor4f(r, g, b, a);
+         GLfloat vertices[] = { x, y, x + width, y, x, y + height, x + width, y + height };
+         glEnableVertexAttribArray(0);
+         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, vertices);
+         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+         glDisableVertexAttribArray(0);
+         glColor4f(1.0f, 1.0f, 1.0f, 1.0f); // Reset color
+         return;
+    }
+
+    glUseProgram(renderer->shader_program);
+
+    // Матрица ортографической проекции
+    float mvp[16] = {
+        2.0f / renderer->width, 0, 0, 0,
+        0, -2.0f / renderer->height, 0, 0,
+        0, 0, 1, 0,
+        -1, 1, 0, 1
+    };
+    glUniformMatrix4fv(renderer->mvp_uniform, 1, GL_FALSE, mvp);
+
     GLfloat vertices[] = {
         x, y,
         x + width, y,
         x, y + height,
         x + width, y + height
     };
-    // Set color
-    glColor4f(r, g, b, a);
-    // Draw quad
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, vertices);
+    GLfloat colors[] = {
+        r, g, b, a,
+        r, g, b, a,
+        r, g, b, a,
+        r, g, b, a
+    };
+
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices) + sizeof(colors), NULL, GL_DYNAMIC_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+    glBufferSubData(GL_ARRAY_BUFFER, sizeof(vertices), sizeof(colors), colors);
+
+    glVertexAttribPointer(renderer->pos_attrib, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(renderer->pos_attrib);
+    glVertexAttribPointer(renderer->color_attrib, 4, GL_FLOAT, GL_FALSE, 0,
+                          (const GLvoid*)sizeof(vertices));
+    glEnableVertexAttribArray(renderer->color_attrib);
+
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    glDisableVertexAttribArray(0);
+
+    glDisableVertexAttribArray(renderer->pos_attrib);
+    glDisableVertexAttribArray(renderer->color_attrib);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glUseProgram(0);
 }
 
 // --- РЕАЛИЗАЦИЯ ФУНКЦИИ РЕНДЕРИНГА ТЕКСТА ---
 void renderer_draw_text(Renderer* renderer, const char* text, float x, float y, float scale, unsigned int color) {
-    if (!renderer || !text || !renderer->simple_shader_program) {
-        // Если шейдер не скомпилировался, рисуем заглушку
+    if (!renderer || !text || !renderer->shader_program) {
+        // Fallback если шейдер не скомпилировался или текст пустой
         if (renderer && text) {
              log_debug("Falling back to placeholder for text: %.20s", text);
              float text_width = strlen(text) * 8.0f * scale;
@@ -289,60 +324,51 @@ void renderer_draw_text(Renderer* renderer, const char* text, float x, float y, 
         return;
     }
 
-    // Активируем шейдерную программу
-    glUseProgram(renderer->simple_shader_program);
+    glUseProgram(renderer->shader_program);
 
-    // Матрица ортографической проекции (упрощенная)
-    // OpenGL ES координаты: (-1, -1) - (1, 1)
-    // Нам нужно преобразовать пиксельные координаты в эти
+    // Матрица ортографической проекции
     float mvp[16] = {
         2.0f / renderer->width, 0, 0, 0,
-        0, -2.0f / renderer->height, 0, 0, // Инвертируем Y
+        0, -2.0f / renderer->height, 0, 0,
         0, 0, 1, 0,
-        -1, 1, 0, 1 // Перенос
+        -1, 1, 0, 1
     };
-    glUniformMatrix4fv(renderer->simple_mvp_uniform, 1, GL_FALSE, mvp);
-
-    // Цвет текста
-    float r = ((color >> 16) & 0xFF) / 255.0f;
-    float g = ((color >> 8) & 0xFF) / 255.0f;
-    float b = (color & 0xFF) / 255.0f;
-    float a = ((color >> 24) & 0xFF) / 255.0f;
+    glUniformMatrix4fv(renderer->mvp_uniform, 1, GL_FALSE, mvp);
 
     size_t len = strlen(text);
-    if (len == 0) return;
+    if (len == 0) {
+        glUseProgram(0);
+        return;
+    }
 
     // Резервируем память для вершин и цветов
-    // Каждый символ как прямоугольник из 2 треугольников = 6 вершин * 2 координаты = 12 float
-    // + 6 вершин * 4 цвета = 24 float
-    // И 6 индексов на символ
-    const int VERTS_PER_CHAR = 6; // 2 треугольника
-    const int FLOATS_PER_VERT = 2; // x, y
-    const int FLOATS_PER_COLOR = 4; // r, g, b, a
-    const int INDICES_PER_CHAR = 6; // 2 треугольника
+    const int VERTS_PER_CHAR = 6;
+    const int FLOATS_PER_VERT = 2;
+    const int FLOATS_PER_COLOR = 4;
+    const float char_width = 8.0f * scale;
+    const float char_height = 16.0f * scale;
 
     GLfloat *vertices = malloc(len * VERTS_PER_CHAR * FLOATS_PER_VERT * sizeof(GLfloat));
     GLfloat *colors = malloc(len * VERTS_PER_CHAR * FLOATS_PER_COLOR * sizeof(GLfloat));
-    GLushort *indices = malloc(len * INDICES_PER_CHAR * sizeof(GLushort));
 
-    if (!vertices || !colors || !indices) {
+    if (!vertices || !colors) {
         log_error("Failed to allocate memory for text rendering buffers");
         free(vertices);
         free(colors);
-        free(indices);
         glUseProgram(0);
         return;
     }
 
     float cursor_x = x;
     float cursor_y = y;
-    const float char_width = 8.0f * scale;
-    const float char_height = 16.0f * scale;
-
     int vert_index = 0;
     int color_index = 0;
-    int index_index = 0;
-    int element_count = 0; // Общее количество вершин для отрисовки
+
+    // Цвет текста
+    float r = ((color >> 16) & 0xFF) / 255.0f;
+    float g = ((color >> 8) & 0xFF) / 255.0f;
+    float b = (color & 0xFF) / 255.0f;
+    float a = ((color >> 24) & 0xFF) / 255.0f;
 
     for (size_t i = 0; i < len; i++) {
         char c = text[i];
@@ -352,7 +378,7 @@ void renderer_draw_text(Renderer* renderer, const char* text, float x, float y, 
             continue;
         }
 
-        // Создаем прямоугольник для символа
+        // Создаем прямоугольник для символа (простая визуализация)
         float x1 = cursor_x;
         float y1 = cursor_y;
         float x2 = cursor_x + char_width;
@@ -360,15 +386,15 @@ void renderer_draw_text(Renderer* renderer, const char* text, float x, float y, 
 
         // Вершины прямоугольника (2 треугольника)
         GLfloat char_verts[] = {
-            x1, y1, // 0
-            x2, y1, // 1
-            x1, y2, // 2
-            x2, y1, // 1 (повтор)
-            x2, y2, // 3
-            x1, y2  // 2 (повтор)
+            x1, y1, x2, y1, x1, y2, // Первый треугольник
+            x2, y1, x2, y2, x1, y2  // Второй треугольник
         };
 
-        // Цвета для каждой вершины
+        // Копируем вершины
+        memcpy(&vertices[vert_index], char_verts, sizeof(char_verts));
+        vert_index += VERTS_PER_CHAR * FLOATS_PER_VERT;
+
+        // Заполняем цвета для всех 6 вершин
         for (int j = 0; j < VERTS_PER_CHAR; j++) {
             colors[color_index++] = r;
             colors[color_index++] = g;
@@ -376,53 +402,39 @@ void renderer_draw_text(Renderer* renderer, const char* text, float x, float y, 
             colors[color_index++] = a;
         }
 
-        // Индексы (просто 0, 1, 2, 3, 4, 5 для этого символа)
-        for (int j = 0; j < INDICES_PER_CHAR; j++) {
-            indices[index_index++] = element_count + j;
-        }
-        element_count += VERTS_PER_CHAR;
-
-        // Копируем вершины
-        memcpy(&vertices[vert_index], char_verts, sizeof(char_verts));
-        vert_index += VERTS_PER_CHAR * FLOATS_PER_VERT;
-
         cursor_x += char_width;
     }
 
-    // Передаем данные в буферы OpenGL
-    glBindBuffer(GL_ARRAY_BUFFER, renderer->simple_vbo);
+    int total_vertices = vert_index / FLOATS_PER_VERT;
+
+    // Передаем данные в буфер OpenGL
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->vbo);
     glBufferData(GL_ARRAY_BUFFER,
-                 element_count * (FLOATS_PER_VERT + FLOATS_PER_COLOR) * sizeof(GLfloat),
+                 total_vertices * (FLOATS_PER_VERT + FLOATS_PER_COLOR) * sizeof(GLfloat),
                  NULL, GL_DYNAMIC_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, element_count * FLOATS_PER_VERT * sizeof(GLfloat), vertices);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, total_vertices * FLOATS_PER_VERT * sizeof(GLfloat), vertices);
     glBufferSubData(GL_ARRAY_BUFFER,
-                    element_count * FLOATS_PER_VERT * sizeof(GLfloat),
-                    element_count * FLOATS_PER_COLOR * sizeof(GLfloat),
+                    total_vertices * FLOATS_PER_VERT * sizeof(GLfloat),
+                    total_vertices * FLOATS_PER_COLOR * sizeof(GLfloat),
                     colors);
 
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, renderer->simple_ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (index_index) * sizeof(GLushort), indices, GL_STATIC_DRAW);
-
     // Атрибуты вершин
-    glVertexAttribPointer(renderer->simple_pos_attrib, FLOATS_PER_VERT, GL_FLOAT, GL_FALSE, 0, 0);
-    glEnableVertexAttribArray(renderer->simple_pos_attrib);
-
-    glVertexAttribPointer(renderer->simple_color_attrib, FLOATS_PER_COLOR, GL_FLOAT, GL_FALSE, 0,
-                          (const GLvoid*)(element_count * FLOATS_PER_VERT * sizeof(GLfloat)));
-    glEnableVertexAttribArray(renderer->simple_color_attrib);
+    glVertexAttribPointer(renderer->pos_attrib, FLOATS_PER_VERT, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(renderer->pos_attrib);
+    glVertexAttribPointer(renderer->color_attrib, FLOATS_PER_COLOR, GL_FLOAT, GL_FALSE, 0,
+                          (const GLvoid*)(total_vertices * FLOATS_PER_VERT * sizeof(GLfloat)));
+    glEnableVertexAttribArray(renderer->color_attrib);
 
     // Рисуем элементы
-    glDrawElements(GL_TRIANGLES, index_index, GL_UNSIGNED_SHORT, 0);
+    glDrawArrays(GL_TRIANGLES, 0, total_vertices);
 
     // Очищаем состояние
-    glDisableVertexAttribArray(renderer->simple_pos_attrib);
-    glDisableVertexAttribArray(renderer->simple_color_attrib);
+    glDisableVertexAttribArray(renderer->pos_attrib);
+    glDisableVertexAttribArray(renderer->color_attrib);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     glUseProgram(0);
 
     free(vertices);
     free(colors);
-    free(indices);
 }
 // --- КОНЕЦ РЕАЛИЗАЦИИ ФУНКЦИИ РЕНДЕРИНГА ТЕКСТА ---
