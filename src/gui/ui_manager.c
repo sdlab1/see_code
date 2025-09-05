@@ -49,7 +49,7 @@ UIManager* ui_manager_create(Renderer* renderer) {
              }
         }
     } else {
-        log_info("Termux GUI backend not available on this system");
+        log_info("Termux-GUI library not available on this system");
     }
 
     return ui_manager;
@@ -71,6 +71,7 @@ void ui_manager_set_diff_data(UIManager* ui_manager, DiffData* data) {
     }
     ui_manager->diff_data = data;
     ui_manager->needs_redraw = 1; // Запрашиваем перерисовку при изменении данных
+    ui_manager_update_layout(ui_manager, ui_manager->scroll_y); // Обновляем высоту контента
 }
 
 // --- ОБНОВЛЕННАЯ ФУНКЦИЯ РАСЧЕТА ВЫСОТЫ ---
@@ -82,8 +83,10 @@ void ui_manager_update_layout(UIManager* ui_manager, float scroll_y) {
     // Рассчитываем высоту контента на основе diff данных, учитывая свернутые секции
     float total_height = 0.0f;
     const float line_height = LINE_HEIGHT;
-    const float file_header_height = line_height;
     const float hunk_header_height = line_height;
+    const float file_header_height = line_height;
+    const float margin = MARGIN;
+    const float hunk_padding = HUNK_PADDING;
     const float file_margin = 10.0f; // Отступы между файлами
     const float hunk_margin = 5.0f;  // Отступы между ханками
 
