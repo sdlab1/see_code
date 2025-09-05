@@ -40,6 +40,7 @@ struct TextRendererInternalData {
 };
 
 // --- Вспомогательная функция для загрузки глифа в атлас ---
+// Копируем реализацию из text_renderer_core.c, так как она нужна только здесь
 static int load_glyph_into_atlas_internal(struct TextRendererInternalData* tr_data, unsigned long char_code) {
     if (!tr_data || !tr_data->is_freetype_initialized) {
         return 0;
@@ -174,13 +175,14 @@ void text_renderer_draw_text(Renderer* renderer, const char* text, float x, floa
 
             if (!load_glyph_into_atlas_internal(tr_data, c)) continue;
 
-            struct { unsigned long uc; float u0,v0,u1,v1; int w,h,bx,by,ax; int loaded; }* cached_glyph = NULL;
-            int cache_index = c - 32;
-            if (cache_index >= 0 && cache_index < 96 && tr_data->glyph_cache[cache_index].is_loaded) {
-                // Приводим к временной структуре для удобства доступа
-                cached_glyph = (void*)&tr_data->glyph_cache[cache_index];
+            // Ищем загруженный глиф в кэше
+            int cache_index = c - 32; // ASCII 32-126 -> индексы 0-95
+            if (cache_index < 0 || cache_index >= 96 || !tr_data->glyph_cache[cache_index].is_loaded) {
+                log_warn("Glyph U+%04X for character '%c' not found in cache after loading", c, c);
+                continue;
             }
-            if (!cached_glyph) continue;
+
+            struct { unsigned long uc; float u0,v0,u1,v1; int w,h,bx,by,ax; int loaded; }* cached_glyph = (void*)&tr_data->glyph_cache[cache_index];
 
             float x_pos = cursor_x + cached_glyph->bx * scale;
             // В OpenGL Y растет вверх, а у нас вниз. Корректируем.
