@@ -38,9 +38,10 @@ target_link_libraries(see_code_network
     pthread
 )
 
-# Data library
+# Data library (теперь включает и парсер)
 add_library(see_code_data
     ${SRC_DIR}/data/diff_data.c
+    ${SRC_DIR}/data/diff_parser.c # Новый файл
 )
 # target_link_libraries(see_code_data cjson) # Убрано, так как отказались от cJSON
 
