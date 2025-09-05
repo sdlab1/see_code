@@ -97,11 +97,6 @@ The application attempts to use rendering backends in this order:
 3. **Termux API** (basic text rendering if fonts fail) - Uses `libtermux-gui-c` library.
 4. **Fail** (if no rendering backend is available)
 
-Fonts used:
-- Primary: Roboto-Regular.ttf (FreeType)
-- Fallback: DroidSansMono.ttf (TrueType)
-- Termux fallback: LiberationMono-Regular.ttf (if available via `pkg install fonts-liberation`)
-
 ## Building Manually
 
 If you prefer to build manually:
