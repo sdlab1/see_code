@@ -5,15 +5,10 @@
 #include "see_code/network/socket_server.h"
 #include "see_code/data/diff_data.h"
 #include "see_code/utils/logger.h"
-// Убираем прямое включение, если ui_manager.h его уже включает
-// #include "see_code/gui/termux_gui_backend.h"
+#include "see_code/gui/termux_gui_backend.h" // Для fallback
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
-
-// --- Добавлено для fallback ---
-#include "see_code/gui/termux_gui_backend.h" // Убедимся, что есть доступ к функциям проверки
-// --- Конец добавления ---
 
 typedef struct {
     AppConfig config;
@@ -24,15 +19,13 @@ typedef struct {
     Renderer* renderer;
     UIManager* ui_manager;
     DiffData* diff_data;
+    TermuxGUIBackend* termux_backend; // Backend для fallback
     // Threading
     pthread_mutex_t state_mutex;
     pthread_t socket_thread;
     // Application state
     float scroll_y;
     int needs_redraw;
-    // --- Добавлено для fallback ---
-    TermuxGUIBackend* termux_backend; // Храним указатель на fallback бэкенд, если он создан
-    // --- Конец добавления ---
 } AppState;
 
 static AppState g_app = {0};
@@ -42,7 +35,7 @@ static void on_socket_data(const char* data_buffer, size_t length) {
     log_info("Received %zu raw bytes from Neovim", length);
     pthread_mutex_lock(&g_app.state_mutex);
 
-    // Instead of parsing JSON, load data from the raw buffer
+    // Load data from the raw buffer using the new parser
     if (diff_data_load_from_buffer(g_app.diff_data, data_buffer, length)) {
         log_info("Successfully loaded data from raw buffer");
         g_app.needs_redraw = 1;
@@ -83,84 +76,52 @@ int app_init(const AppConfig* config) {
         goto cleanup;
     }
 
-    // --- Логика инициализации с fallback ---
+    // --- ЛОГИКА ИНИЦИАЛИЗАЦИИ РЕНДЕРЕРА С FALLBACK ---
     // 1. Попробуем инициализировать основной GLES2 рендерер
     g_app.renderer = renderer_create(config->window_width, config->window_height);
     if (!g_app.renderer) {
-        log_error("Failed to initialize GLES2 renderer");
-        // 2. Если GLES2 не удался, проверим доступность Termux-GUI
+        log_warn("Failed to initialize GLES2 renderer");
+        // 2. GLES2 не удался, проверим и подготовим Termux-GUI как fallback
         if (termux_gui_backend_is_available()) {
-            log_warn("Attempting fallback to Termux GUI renderer");
-            // 3. Создаем и инициализируем бэкенд Termux-GUI
+            log_info("Termux-GUI library is available");
             g_app.termux_backend = termux_gui_backend_create();
-            if (!g_app.termux_backend) {
-                 log_error("Failed to create Termux GUI backend");
-                 goto cleanup; // Оба рендерера недоступны
+            if (g_app.termux_backend) {
+                if (termux_gui_backend_init(g_app.termux_backend)) {
+                    log_info("Termux GUI backend initialized successfully for potential fallback");
+                } else {
+                    log_error("Failed to initialize Termux GUI backend connection/activity");
+                    termux_gui_backend_destroy(g_app.termux_backend);
+                    g_app.termux_backend = NULL;
+                }
+            } else {
+                log_error("Failed to create Termux GUI backend instance");
             }
-            if (!termux_gui_backend_init(g_app.termux_backend)) {
-                 log_error("Failed to initialize Termux GUI backend");
-                 termux_gui_backend_destroy(g_app.termux_backend);
-                 g_app.termux_backend = NULL;
-                 goto cleanup; // Оба рендерера недоступны
-            }
-            // 4. Сообщаем UI Manager, что нужно использовать fallback
-            //    (предполагается, что ui_manager_create может принимать информацию о типе)
-            //    Или создаем ui_manager позже.
-            //    Для простоты, сначала создаем ui_manager с NULL renderer,
-            //    а потом переключаем его тип. Это требует, чтобы ui_manager
-            //    мог работать без внутреннего GLES2 рендерера, если тип RENDERER_TYPE_TERMUX_GUI.
-            //    Альтернатива: создавать ui_manager после выбора рендерера.
-            //    Выберем второй путь: сначала определяем рендерер, потом создаем ui_manager.
-
-            // Так как ui_manager_create требует renderer, а у нас его нет,
-            // мы не можем создать ui_manager стандартным способом.
-            // Нужно изменить ui_manager_create или логику здесь.
-            // Пока предположим, что ui_manager может быть создан с NULL,
-            // а его тип переключается позже. Это требует изменений в ui_manager.c/h.
-            // Чтобы не менять ui_manager, создадим его после определения активного рендерера.
-            // Но ui_manager_create требует renderer. Значит, нужно передать информацию
-            // о типе рендерера другим способом или изменить ui_manager.
-
-            // Вариант: создаем ui_manager с NULL, а потом переключаем тип.
-            // Это требует изменения ui_manager.c/h. Сделаем это предположение.
-            // Если ui_manager_create не принимает NULL, это приведет к краху.
-            // Лучше изменить логику: сначала определяем тип, потом создаем нужные компоненты.
-            // Но это требует большего рефакторинга.
-
-            // Для минимального изменения: создаем ui_manager с NULL renderer.
-            // Это потребует изменений в ui_manager_create, чтобы она не падала.
-            // Предположим, что ui_manager_create может обработать NULL.
-            // Если это не так, потребуется изменить ui_manager.c.
-
-            // Создаем UI manager с NULL, планируя переключить тип
-            g_app.ui_manager = ui_manager_create(NULL); // Потенциально опасно, если ui_manager_create проверяет на NULL
-            if (!g_app.ui_manager) {
-                log_error("Failed to initialize UI manager for Termux GUI fallback");
-                termux_gui_backend_destroy(g_app.termux_backend);
-                g_app.termux_backend = NULL;
-                goto cleanup;
-            }
-            // Переключаем тип рендерера в UI manager
-            ui_manager_set_renderer_type(g_app.ui_manager, RENDERER_TYPE_TERMUX_GUI);
-            log_info("Using Termux GUI as primary renderer (GLES2 failed)");
-
         } else {
-            // GLES2 не работает и Termux-GUI недоступен
-            log_error("No suitable renderer available (GLES2 failed, Termux-GUI not available)");
+            log_info("Termux-GUI library is not available");
+        }
+
+        // 3. Создаем UI manager с NULL renderer, он должен переключиться на fallback
+        g_app.ui_manager = ui_manager_create(NULL);
+        if (!g_app.ui_manager) {
+            log_error("Failed to initialize UI manager for fallback mode");
             goto cleanup;
         }
+        // Явно указываем использовать fallback
+        ui_manager_set_renderer_type(g_app.ui_manager, RENDERER_TYPE_TERMUX_GUI);
+        log_info("UI Manager configured to use Termux-GUI fallback renderer");
+
     } else {
         // GLES2 рендерер инициализирован успешно
-        log_info("Using GLES2 as primary renderer");
+        log_info("GLES2 renderer initialized successfully");
         // Создаем UI manager с GLES2 рендерером
         g_app.ui_manager = ui_manager_create(g_app.renderer);
         if (!g_app.ui_manager) {
-            log_error("Failed to initialize UI manager");
+            log_error("Failed to initialize UI manager with GLES2 renderer");
             goto cleanup;
         }
-        // Тип рендерера по умолчанию в ui_manager уже RENDERER_TYPE_GLES2
+        log_info("UI Manager configured to use GLES2 renderer");
     }
-    // --- Конец логики инициализации с fallback ---
+    // --- КОНЕЦ ЛОГИКИ ИНИЦИАЛИЗАЦИИ РЕНДЕРЕРА С FALLBACK ---
 
 
     // Initialize socket server
@@ -196,20 +157,15 @@ int app_update(void) {
 
     pthread_mutex_lock(&g_app.state_mutex);
 
-    // Handle renderer updates
-    // Проверяем, какой рендерер активен
-    // if (g_app.renderer) { // Это условие больше не подходит, так как renderer может быть NULL при fallback
-    // Лучше проверять тип рендерера через ui_manager или напрямую через флаг/указатель
-    // Предположим, что ui_manager знает, какой рендерер использовать.
-    // Для GLES2 рендерера нужен begin_frame/end_frame
-    if (g_app.renderer) { // Если основной рендерер существует
+    // Handle renderer updates based on active renderer type
+    if (ui_manager_get_renderer_type(g_app.ui_manager) == RENDERER_TYPE_GLES2 && g_app.renderer) {
         if (!renderer_begin_frame(g_app.renderer)) {
             log_error("Failed to begin renderer frame");
             pthread_mutex_unlock(&g_app.state_mutex);
             return 0;
         }
     }
-    // Для Termux-GUI эти вызовы не нужны, или они абстрагированы в ui_manager
+    // Для Termux-GUI begin_frame не нужен
 
     // Update UI if needed
     if (g_app.needs_redraw) {
@@ -221,14 +177,14 @@ int app_update(void) {
     ui_manager_render(g_app.ui_manager);
 
     // End frame
-    if (g_app.renderer) { // Если основной рендерер существует
+    if (ui_manager_get_renderer_type(g_app.ui_manager) == RENDERER_TYPE_GLES2 && g_app.renderer) {
         if (!renderer_end_frame(g_app.renderer)) {
             log_error("Failed to end renderer frame");
             pthread_mutex_unlock(&g_app.state_mutex);
             return 0;
         }
     }
-    // Для Termux-GUI этот вызов не нужен
+    // Для Termux-GUI end_frame не нужен
 
     pthread_mutex_unlock(&g_app.state_mutex);
     return 1;
@@ -256,7 +212,7 @@ void app_cleanup(void) {
         pthread_join(g_app.socket_thread, NULL);
     }
 
-    // Clean up components
+    // Clean up components in reverse order
     if (g_app.socket_server) {
         socket_server_destroy(g_app.socket_server);
         g_app.socket_server = NULL;
@@ -273,12 +229,10 @@ void app_cleanup(void) {
         diff_data_destroy(g_app.diff_data);
         g_app.diff_data = NULL;
     }
-    // --- Добавлено для fallback ---
     if (g_app.termux_backend) {
         termux_gui_backend_destroy(g_app.termux_backend);
         g_app.termux_backend = NULL;
     }
-    // --- Конец добавления ---
 
     // Clean up threading
     pthread_mutex_destroy(&g_app.state_mutex);
@@ -303,6 +257,7 @@ void app_handle_touch(float x, float y) {
     log_debug("Touch event at (%.2f, %.2f)", x, y);
 
     // Convert touch coordinates and handle UI interaction
+    // ui_manager expects y coordinate adjusted by scroll
     if (ui_manager_handle_touch(g_app.ui_manager, x, y + g_app.scroll_y)) {
         g_app.needs_redraw = 1;
         log_debug("Touch handled by UI manager");
@@ -342,8 +297,8 @@ void app_handle_resize(int width, int height) {
     g_app.config.window_width = width;
     g_app.config.window_height = height;
 
-    // Update renderer
-    if (g_app.renderer) {
+    // Update renderer if it's GLES2
+    if (ui_manager_get_renderer_type(g_app.ui_manager) == RENDERER_TYPE_GLES2 && g_app.renderer) {
         renderer_resize(g_app.renderer, width, height);
     }
 
