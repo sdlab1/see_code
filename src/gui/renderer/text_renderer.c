@@ -249,5 +249,5 @@ void text_renderer_cleanup(Renderer* renderer) {
 }
 
 // --- УДАЛЕНА РЕАЛИЗАЦИЯ text_renderer_draw_text ---
-// Реализация перенесена в src/gui/renderer/text_renderer_explanation_plug.c
+// Реализация перенесена в src/gui/renderer/freetype_text_renderer_init.c
 // --- КОНЕЦ УДАЛЕННОЙ РЕАЛИЗАЦИИ ---
