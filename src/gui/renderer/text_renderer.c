@@ -1,263 +1,383 @@
-// src/gui/renderer.c
-#include "see_code/gui/renderer.h"
+// src/gui/renderer/text_renderer.c
+#include "see_code/gui/renderer/text_renderer.h"
+#include "see_code/gui/renderer.h" // Для доступа к gl функциям и renderer_draw_quad
+#include "see_code/gui/renderer/gl_context.h" // Для доступа к GLContext, если нужно
+#include "see_code/gui/renderer/gl_shaders.h" // Для доступа к скомпилированным шейдерам
+#include "see_code/gui/renderer/gl_primitives.h" // Для рисования квадратов
 #include "see_code/utils/logger.h"
-#include "see_code/core/config.h"
+#include "see_code/core/config.h" // Для путей к шрифтам и констант
 #include <stdlib.h>
 #include <string.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include <stdio.h> // Для snprintf
+#include <math.h>  // Для floorf
 
-// --- Forward declarations for new modules ---
-// In a full refactoring, these would come from their respective headers
-// gl_context.h
-typedef struct GLContext GLContext;
-GLContext* gl_context_create(int width, int height);
-void gl_context_destroy(GLContext* ctx);
-int gl_context_begin_frame(GLContext* ctx);
-int gl_context_end_frame(GLContext* ctx);
-void gl_context_resize(GLContext* ctx, int width, int height);
-void gl_context_clear(GLContext* ctx, float r, float g, float b, float a);
-// gl_shaders.h
-GLuint gl_shaders_compile_shader(GLenum type, const char* source);
-GLuint gl_shaders_create_program(GLuint vertex_shader, GLuint fragment_shader);
-GLuint gl_shaders_create_program_from_sources(const char* vertex_source, const char* fragment_source);
-extern const char* gl_shaders_textured_vertex_shader_source;
-extern const char* gl_shaders_textured_fragment_shader_source;
-extern const char* gl_shaders_solid_vertex_shader_source;
-extern const char* gl_shaders_solid_fragment_shader_source;
-// gl_primitives.h
-int gl_primitives_draw_solid_quad(GLuint program_id, float x, float y, float width, float height,
-                                 float r, float g, float b, float a,
-                                 const float mvp[16], GLuint vbo_id);
-int gl_primitives_draw_textured_quad(GLuint program_id, GLuint texture_id,
-                                    float x, float y, float width, float height,
-                                    float u0, float v0, float u1, float v1,
-                                    unsigned int color_rgba,
-                                    const float mvp[16], GLuint vbo_id);
-// text_renderer.h (уже существует)
-// Предполагаем, что text_renderer_init, text_renderer_cleanup, text_renderer_draw_text определены
-// --- End Forward declarations ---
-
-// --- Internal data structures for new modules ---
-// In a full refactoring, these would be opaque in the header
-struct GLContext {
-    EGLDisplay display;
-    EGLSurface surface;
-    EGLContext context;
-    int width;
-    int height;
-};
-// gl_shaders, gl_primitives don't expose internal state in this design
-// --- End Internal data structures ---
-
-// --- Updated Renderer structure ---
-// Now holds handles to the modular components
-struct Renderer {
-    GLContext* gl_ctx;
-    // Shaders
-    GLuint shader_program_solid;
-    GLuint shader_program_textured;
-    // Primitives/VBOs
-    GLuint vbo_solid;
-    GLuint vbo_textured;
-    // Text rendering data (moved here for simplicity in this step)
-    // In a full refactor, text_renderer would manage its own data
-    struct TextRendererInternalData* text_internal_data; // For interaction with text_renderer
-    int width;
-    int height;
-};
-// --- End Updated Renderer structure ---
-
-// --- Helper functions for accessing internal text data ---
-// These would ideally be declared in renderer.h or managed differently
+// --- Внутренняя структура данных для text_renderer ---
+// Эта структура будет содержать все данные, необходимые для рендеринга текста.
 struct TextRendererInternalData {
-    int is_placeholder; // Just to make it a valid struct
-    // Actual fields would be defined in text_renderer.c
+    int is_freetype_initialized;
+    FT_Library ft_library;
+    FT_Face ft_face;
+    GLuint texture_atlas_id; // ID OpenGL текстуры для атласа глифов
+    unsigned char* texture_atlas_data; // CPU-side данные атласа
+    int atlas_width;
+    int atlas_height;
+    // Простой кэш глифов (ASCII 32-126)
+    struct {
+        unsigned long unicode_char;
+        float u0, v0, u1, v1; // UV координаты в атласе
+        int width, height;   // Размеры глифа
+        int bearing_x, bearing_y; // Смещения от базовой линии
+        int advance_x;         // Продвижение курсора
+        int is_loaded;         // Флаг, загружен ли глиф
+    } glyph_cache[96]; // ASCII 32 (space) до 126 (~)
+    // Ресурсы OpenGL для рендеринга текста
+    GLuint shader_program_textured; // Шейдерная программа для текстурированных квадратов (из gl_shaders)
+    GLuint vbo; // Общий VBO для текстовых квадратов (из gl_primitives или свой?)
 };
-struct TextRendererInternalData* renderer_get_internal_text_data(const Renderer* renderer) {
-    return renderer ? renderer->text_internal_data : NULL;
-}
-void renderer_set_internal_text_data(Renderer* renderer, struct TextRendererInternalData* data) {
-    if (renderer) renderer->text_internal_data = data;
-}
-// --- End Helper functions ---
 
-Renderer* renderer_create(int width, int height) {
-    Renderer* renderer = malloc(sizeof(Renderer));
-    if (!renderer) {
-        log_error("Failed to allocate memory for Renderer");
-        return NULL;
-    }
-    memset(renderer, 0, sizeof(Renderer));
-    renderer->width = width;
-    renderer->height = height;
+// --- Вспомогательные функции FreeType ---
+static int init_freetype_internal(struct TextRendererInternalData* tr_data, const char* font_path) {
+    if (!tr_data || !font_path) return 0;
 
-    log_info("Initializing modular renderer components...");
-
-    // --- 1. Initialize GL Context ---
-    renderer->gl_ctx = gl_context_create(width, height);
-    if (!renderer->gl_ctx) {
-        log_error("Failed to initialize GL context");
-        free(renderer);
-        return NULL;
-    }
-    log_debug("GL Context initialized");
-
-    // --- 2. Initialize Shaders ---
-    // Solid color shader
-    renderer->shader_program_solid = gl_shaders_create_program_from_sources(
-        gl_shaders_solid_vertex_shader_source,
-        gl_shaders_solid_fragment_shader_source
-    );
-    if (!renderer->shader_program_solid) {
-        log_error("Failed to create solid shader program");
-        // Not critical, but rendering will be broken
-    } else {
-        log_debug("Solid shader program created");
-    }
-
-    // Textured shader (for text)
-    renderer->shader_program_textured = gl_shaders_create_program_from_sources(
-        gl_shaders_textured_vertex_shader_source,
-        gl_shaders_textured_fragment_shader_source
-    );
-    if (!renderer->shader_program_textured) {
-        log_error("Failed to create textured shader program");
-        // Not critical for basic quads, but text rendering will be broken
-    } else {
-        log_debug("Textured shader program created");
-    }
-
-    // --- 3. Initialize Primitive Resources (VBOs) ---
-    // glGenBuffers is a GLES2 function, so we need a context current
-    // gl_context_begin_frame makes context current
-    if (!gl_context_begin_frame(renderer->gl_ctx)) {
-        log_error("Failed to make context current for VBO creation");
-        gl_context_destroy(renderer->gl_ctx);
-        free(renderer);
-        return NULL;
-    }
-
-    glGenBuffers(1, &renderer->vbo_solid);
-    glGenBuffers(1, &renderer->vbo_textured);
-    log_debug("Primitive VBOs created");
-
-    // We are done with immediate GL calls for setup
-    // gl_context_end_frame would swap buffers, which is not needed here
-    // Context will be made current again in renderer_begin_frame
-
-    log_info("Modular renderer components initialized");
-    return renderer;
-}
-
-void renderer_destroy(Renderer* renderer) {
-    if (!renderer) {
-        return;
-    }
-
-    log_info("Cleaning up modular renderer components...");
-
-    // --- Cleanup in reverse order ---
-    if (renderer->vbo_solid) glDeleteBuffers(1, &renderer->vbo_solid);
-    if (renderer->vbo_textured) glDeleteBuffers(1, &renderer->vbo_textured);
-    log_debug("Primitive VBOs deleted");
-
-    if (renderer->shader_program_solid) glDeleteProgram(renderer->shader_program_solid);
-    if (renderer->shader_program_textured) glDeleteProgram(renderer->shader_program_textured);
-    log_debug("Shader programs deleted");
-
-    if (renderer->gl_ctx) {
-        gl_context_destroy(renderer->gl_ctx);
-        log_debug("GL Context destroyed");
-    }
-
-    // Note: text_internal_data cleanup is handled by text_renderer_cleanup
-    // which is called from app.c/renderer manager
-
-    free(renderer);
-    log_info("Modular renderer components cleaned up");
-}
-
-int renderer_begin_frame(Renderer* renderer) {
-    if (!renderer || !renderer->gl_ctx) {
+    if (FT_Init_FreeType(&tr_data->ft_library)) {
+        log_error("Could not init FreeType library");
         return 0;
     }
-    // Delegate to gl_context
-    return gl_context_begin_frame(renderer->gl_ctx);
-    // MVP matrix setup, clearing, etc., would happen here or be managed by caller/UIManager
-}
+    log_debug("FreeType library initialized");
 
-int renderer_end_frame(Renderer* renderer) {
-    if (!renderer || !renderer->gl_ctx) {
+    if (FT_New_Face(tr_data->ft_library, font_path, 0, &tr_data->ft_face)) {
+        log_error("Failed to load font from %s", font_path);
+        FT_Done_FreeType(tr_data->ft_library);
         return 0;
     }
-    // Delegate to gl_context
-    return gl_context_end_frame(renderer->gl_ctx);
-    // Swapping buffers happens inside gl_context_end_frame
+    log_debug("Font loaded from %s", font_path);
+
+    FT_Set_Pixel_Sizes(tr_data->ft_face, 0, FONT_SIZE_DEFAULT); // Используем значение из config.h
+
+    tr_data->atlas_width = ATLAS_WIDTH_DEFAULT;
+    tr_data->atlas_height = ATLAS_HEIGHT_DEFAULT;
+    tr_data->texture_atlas_data = calloc(1, tr_data->atlas_width * tr_data->atlas_height);
+    if (!tr_data->texture_atlas_data) {
+        log_error("Failed to allocate memory for texture atlas");
+        FT_Done_Face(tr_data->ft_face);
+        FT_Done_FreeType(tr_data->ft_library);
+        return 0;
+    }
+
+    // Инициализируем кэш глифов
+    memset(tr_data->glyph_cache, 0, sizeof(tr_data->glyph_cache));
+
+    // Создаем OpenGL текстуру для атласа
+    glGenTextures(1, &tr_data->texture_atlas_id);
+    glBindTexture(GL_TEXTURE_2D, tr_data->texture_atlas_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // Изначально атлас пустой
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, tr_data->atlas_width, tr_data->atlas_height, 0, GL_ALPHA, GL_UNSIGNED_BYTE, tr_data->texture_atlas_data);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    tr_data->is_freetype_initialized = 1;
+    log_info("FreeType initialized successfully with font %s", font_path);
+    return 1;
 }
 
-void renderer_resize(Renderer* renderer, int width, int height) {
-    if (!renderer || !renderer->gl_ctx) {
+static int load_glyph_into_atlas_internal(struct TextRendererInternalData* tr_data, unsigned long char_code) {
+    if (!tr_data || !tr_data->is_freetype_initialized) {
+        return 0;
+    }
+
+    // Проверяем, есть ли глиф уже в кэше
+    int cache_index = char_code - 32; // ASCII 32-126 -> индексы 0-95
+    if (cache_index < 0 || cache_index >= 96) {
+        log_debug("Character U+%04lX is outside ASCII range 32-126, skipping", char_code);
+        return 0; // Вне диапазона кэша
+    }
+
+    if (tr_data->glyph_cache[cache_index].is_loaded) {
+        return 1; // Уже загружен
+    }
+
+    if (FT_Load_Char(tr_data->ft_face, char_code, FT_LOAD_RENDER)) {
+        log_warn("Failed to load glyph for character U+%04lX", char_code);
+        return 0;
+    }
+
+    FT_GlyphSlot slot = tr_data->ft_face->glyph;
+    int bitmap_width = slot->bitmap.width;
+    int bitmap_rows = slot->bitmap.rows;
+
+    // Найдем место в атласе (простой алгоритм "первое подходящее место")
+    // В реальной реализации лучше использовать более сложные аллокаторы
+    int pen_x = 0, pen_y = 0;
+    int row_height = 0;
+    int found_space = 0;
+
+    // Простой поиск места: идем по строкам
+    for (int y = 0; y < tr_data->atlas_height - bitmap_rows; ) {
+        int max_h_in_row = 0;
+        for (int x = 0; x < tr_data->atlas_width - bitmap_width; ) {
+            // Проверяем, свободно ли место в прямоугольнике (x,y,bitmap_width,bitmap_rows)
+            int is_free = 1;
+            for (int yy = y; yy < y + bitmap_rows && is_free; yy++) {
+                for (int xx = x; xx < x + bitmap_width && is_free; xx++) {
+                    if (tr_data->texture_atlas_data[yy * tr_data->atlas_width + xx] != 0) {
+                        is_free = 0;
+                    }
+                }
+            }
+            if (is_free) {
+                pen_x = x;
+                pen_y = y;
+                found_space = 1;
+                max_h_in_row = bitmap_rows > max_h_in_row ? bitmap_rows : max_h_in_row;
+                break; // Нашли место, выходим из внутреннего цикла
+            } else {
+                // Пропускаем занятую область
+                x += bitmap_width + 1; // Простой сдвиг
+            }
+        }
+        if (found_space) {
+            row_height = max_h_in_row;
+            break; // Нашли место, выходим из внешнего цикла
+        }
+        y += row_height + 1; // Переходим к следующей строке
+        row_height = 0; // Сброс высоты для новой строки
+    }
+
+    if (!found_space) {
+        log_warn("No space left in texture atlas for glyph U+%04lX", char_code);
+        return 0; // Нет места
+    }
+
+    // Копируем битмап глифа в атлас
+    for (int row = 0; row < bitmap_rows; row++) {
+        for (int col = 0; col < bitmap_width; col++) {
+            int atlas_index = (pen_y + row) * tr_data->atlas_width + (pen_x + col);
+            int bitmap_index = row * slot->bitmap.width + col;
+            // Используем альфа-канал
+            tr_data->texture_atlas_data[atlas_index] = slot->bitmap.buffer[bitmap_index];
+        }
+    }
+
+    // Обновляем текстуру OpenGL
+    glBindTexture(GL_TEXTURE_2D, tr_data->texture_atlas_id);
+    // glTexSubImage2D более эффективен, если обновляется только часть
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tr_data->atlas_width, tr_data->atlas_height, GL_ALPHA, GL_UNSIGNED_BYTE, tr_data->texture_atlas_data);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Добавляем глиф в кэш
+    tr_data->glyph_cache[cache_index].unicode_char = char_code;
+    tr_data->glyph_cache[cache_index].u0 = (float)pen_x / tr_data->atlas_width;
+    tr_data->glyph_cache[cache_index].v0 = (float)pen_y / tr_data->atlas_height;
+    tr_data->glyph_cache[cache_index].u1 = (float)(pen_x + bitmap_width) / tr_data->atlas_width;
+    tr_data->glyph_cache[cache_index].v1 = (float)(pen_y + bitmap_rows) / tr_data->atlas_height;
+    tr_data->glyph_cache[cache_index].width = bitmap_width;
+    tr_data->glyph_cache[cache_index].height = bitmap_rows;
+    tr_data->glyph_cache[cache_index].bearing_x = slot->bitmap_left;
+    tr_data->glyph_cache[cache_index].bearing_y = slot->bitmap_top;
+    tr_data->glyph_cache[cache_index].advance_x = slot->advance.x >> 6; // В пикселях
+    tr_data->glyph_cache[cache_index].is_loaded = 1;
+
+    log_debug("Loaded glyph U+%04lX into atlas at (%d,%d)", char_code, pen_x, pen_y);
+    return 1;
+}
+// --- Конец вспомогательных функций FreeType ---
+
+int text_renderer_init(Renderer* renderer, const char* font_path_hint) {
+    if (!renderer) return 0;
+
+    // Выделяем память для внутренних данных text_renderer
+    struct TextRendererInternalData* tr_data = calloc(1, sizeof(struct TextRendererInternalData));
+    if (!tr_data) {
+        log_error("Failed to allocate memory for TextRendererInternalData");
+        return 0;
+    }
+
+    // --- Получаем скомпилированную шейдерную программу из gl_shaders ---
+    // Предполагаем, что renderer предоставляет доступ к ресурсам других модулей
+    // Например, через функции или поля.
+    // Для этого примера, предположим, что renderer имеет доступ к gl_shaders.
+    // В реальном проекте это может быть реализовано по-разному.
+    // Предположим, что renderer_get_shader_program_textured(renderer) возвращает GLuint.
+    // extern GLuint renderer_get_shader_program_textured(const Renderer* r);
+    // tr_data->shader_program_textured = renderer_get_shader_program_textured(renderer);
+    // Пока что, используем предопределенную программу из gl_shaders.
+    // tr_data->shader_program_textured = gl_shaders_get_predefined_textured_program();
+    // Или создадим свою, как в предыдущем примере.
+    // Для простоты, создадим свою.
+    static const char* textured_vertex_shader_source =
+        "#version 100\n"
+        "attribute vec2 position;\n"
+        "attribute vec2 texcoord;\n"
+        "varying vec2 frag_texcoord;\n"
+        "uniform mat4 mvp;\n"
+        "void main() {\n"
+        "  gl_Position = mvp * vec4(position, 0.0, 1.0);\n"
+        "  frag_texcoord = texcoord;\n"
+        "}\n";
+
+    static const char* textured_fragment_shader_source =
+        "#version 100\n"
+        "precision mediump float;\n"
+        "varying vec2 frag_texcoord;\n"
+        "uniform sampler2D tex;\n"
+        "uniform vec4 text_color;\n" // Цвет текста передается как uniform
+        "void main() {\n"
+        "  vec4 tex_color = texture2D(tex, frag_texcoord);\n"
+        "  gl_FragColor = text_color * vec4(1.0, 1.0, 1.0, tex_color.a);\n" // Используем альфа из текстуры
+        "}\n";
+
+    tr_data->shader_program_textured = gl_shaders_create_program_from_sources(
+        textured_vertex_shader_source,
+        textured_fragment_shader_source
+    );
+    if (!tr_data->shader_program_textured) {
+        log_warn("Failed to create textured shader program for text renderer");
+        // Можно продолжить без продвинутого текстового рендеринга
+    }
+
+    // Создаем VBO для текстовых квадратов
+    glGenBuffers(1, &tr_data->vbo);
+
+    // --- Попытка инициализации FreeType ---
+    log_info("Attempting to initialize FreeType...");
+    const char* font_to_try = font_path_hint ? font_path_hint : FREETYPE_FONT_PATH; // Используем hint или default
+    if (!init_freetype_internal(tr_data, font_to_try)) {
+        log_warn("Failed to initialize FreeType with primary font: %s", font_to_try);
+        // Пробуем fallback шрифт
+        if (!init_freetype_internal(tr_data, TRUETYPE_FONT_PATH)) {
+             log_warn("Failed to initialize FreeType with fallback font: %s", TRUETYPE_FONT_PATH);
+             log_warn("Text rendering will use placeholder rectangles.");
+             tr_data->is_freetype_initialized = 0; // Явно помечаем как не инициализированный
+        } else {
+            log_info("FreeType initialized with fallback font: %s", TRUETYPE_FONT_PATH);
+        }
+    } else {
+        log_info("FreeType initialized with primary font: %s", font_to_try);
+    }
+    // --- Конец попытки инициализации FreeType ---
+
+    // Сохраняем указатель на внутренние данные в основном рендерере
+    // Предполагаем, что в renderer.h есть способ установить внутренние данные
+    // extern void renderer_set_internal_text_data(Renderer* r, struct TextRendererInternalData* data);
+    // renderer_set_internal_text_data(renderer, tr_data);
+    // Для этого примера, предположим, что поле `text_internal_data_private` добавлено в `struct Renderer`.
+    renderer->text_internal_data_private = tr_data; // Не рекомендуется без модификации struct Renderer
+    // Лучше: добавить поле в struct Renderer и функции доступа.
+    // Предположим, что это сделано.
+    // В renderer.h нужно добавить:
+    // struct TextRendererInternalData* text_internal_data_private;
+    // В renderer.c нужно добавить:
+    // void renderer_set_internal_text_data(Renderer* r, struct TextRendererInternalData* data) {
+    //     if (r) r->text_internal_data_private = data;
+    // }
+    // struct TextRendererInternalData* renderer_get_internal_text_data(const Renderer* r) {
+    //     return r ? r->text_internal_data_private : NULL;
+    // }
+
+    log_info("Text renderer initialized");
+    return 1;
+}
+
+void text_renderer_cleanup(Renderer* renderer) {
+    if (!renderer) return;
+    // struct TextRendererInternalData* tr_data = renderer_get_internal_text_data(renderer);
+    struct TextRendererInternalData* tr_data = (struct TextRendererInternalData*)renderer->text_internal_data_private;
+    if (!tr_data) return;
+
+    if (tr_data->shader_program_textured) glDeleteProgram(tr_data->shader_program_textured);
+    if (tr_data->vbo) glDeleteBuffers(1, &tr_data->vbo);
+
+    if (tr_data->texture_atlas_id) glDeleteTextures(1, &tr_data->texture_atlas_id);
+    if (tr_data->texture_atlas_data) free(tr_data->texture_atlas_data);
+    if (tr_data->ft_face) FT_Done_Face(tr_data->ft_face);
+    if (tr_data->ft_library) FT_Done_FreeType(tr_data->ft_library);
+    tr_data->is_freetype_initialized = 0;
+    // memset(tr_data->glyph_cache, 0, sizeof(tr_data->glyph_cache)); // Не обязательно, так как структура будет освобождена
+    tr_data->glyph_count_in_cache = 0; // Сбрасываем счетчик
+    free(tr_data);
+    renderer->text_internal_data_private = NULL; // Очищаем указатель
+    log_debug("Text renderer cleaned up");
+}
+
+void text_renderer_draw_text(Renderer* renderer, const char* text, float x, float y, float scale, unsigned int color) {
+    if (!renderer || !text) return;
+
+    // struct TextRendererInternalData* tr_data = renderer_get_internal_text_data(renderer);
+    struct TextRendererInternalData* tr_data = (struct TextRendererInternalData*)renderer->text_internal_data_private;
+    if (!tr_data) {
+        log_error("TextRendererInternalData is NULL in text_renderer_draw_text");
         return;
     }
-    renderer->width = width;
-    renderer->height = height;
-    // Delegate to gl_context
-    gl_context_resize(renderer->gl_ctx, width, height);
-    // Viewport update happens inside gl_context_resize
-}
 
-void renderer_clear(float r, float g, float b, float a) {
-    if (!renderer || !renderer->gl_ctx) {
-        // Fallback clear or log?
-        log_debug("Renderer or GL context is NULL in renderer_clear");
-        return;
+    if (tr_data->is_freetype_initialized && tr_data->shader_program_textured) {
+        // --- FULL FREEType RENDERING ---
+        float cursor_x = x;
+        float cursor_y = y; // Базовая линия
+
+        // Матрица MVP (предполагаем ортографическую проекцию)
+        // В реальном приложении её лучше получать из контекста или передавать
+        // float mvp[16];
+        // Заполнение mvp опущено для краткости, см. gl_context или renderer
+        float mvp[16] = {
+             2.0f / renderer_get_width(renderer), 0, 0, 0,
+             0, -2.0f / renderer_get_height(renderer), 0, 0,
+             0, 0, 1, 0,
+            -1, 1, 0, 1
+        };
+
+        size_t len = strlen(text);
+        for (size_t i = 0; i < len; i++) {
+            unsigned char c = text[i];
+            if (c < 32 || c > 126) continue; // Только ASCII для простоты
+
+            if (!load_glyph_into_atlas_internal(tr_data, c)) continue;
+
+            struct { unsigned long uc; float u0,v0,u1,v1; int w,h,bx,by,ax; int loaded; }* cached_glyph = NULL;
+            int cache_index = c - 32;
+            if (cache_index >= 0 && cache_index < 96 && tr_data->glyph_cache[cache_index].is_loaded) {
+                // Приводим к временной структуре для удобства доступа
+                cached_glyph = (void*)&tr_data->glyph_cache[cache_index];
+            }
+            if (!cached_glyph) continue;
+
+            float x_pos = cursor_x + cached_glyph->bx * scale;
+            // В OpenGL Y растет вверх, а у нас вниз. Корректируем.
+            float y_pos = cursor_y - (cached_glyph->h - cached_glyph->by) * scale;
+            float w = cached_glyph->w * scale;
+            float h = cached_glyph->h * scale;
+
+            // Рисуем текстурированный квадрат
+            // Используем gl_primitives для рисования
+            gl_primitives_draw_textured_quad(
+                tr_data->shader_program_textured,
+                tr_data->texture_atlas_id,
+                x_pos, y_pos, w, h,
+                cached_glyph->u0, cached_glyph->v0, cached_glyph->u1, cached_glyph->v1,
+                color, // Передаем цвет в функцию
+                mvp,
+                tr_data->vbo // Используем общий VBO
+            );
+
+            cursor_x += cached_glyph->ax * scale;
+        }
+        // --- КОНЕЦ FULL FREEType RENDERING ---
+    } else {
+        // --- FALLBACK RENDERING ---
+        log_debug("FreeType not initialized, using placeholder for text: %.20s", text);
+        float text_width = strlen(text) * 8.0f * scale;
+        float text_height = 16.0f * scale;
+        float r = ((color >> 16) & 0xFF) / 255.0f;
+        float g = ((color >> 8) & 0xFF) / 255.0f;
+        float b = (color & 0xFF) / 255.0f;
+        float a = ((color >> 24) & 0xFF) / 255.0f;
+        // Предполагаем, что renderer_draw_quad определен в renderer.c и делегируется gl_primitives
+        // extern void renderer_draw_quad(Renderer* r, float x, float y, float width, float height, float r, float g, float b, float a);
+        renderer_draw_quad(renderer, x, y, text_width, text_height, r, g, b, a);
+        // --- КОНЕЦ FALLBACK RENDERING ---
     }
-    // Delegate to gl_context
-    gl_context_clear(renderer->gl_ctx, r, g, b, a);
-    // glClearColor and glClear happen inside gl_context_clear
-}
-
-void renderer_draw_quad(float x, float y, float width, float height,
-                       float r, float g, float b, float a) {
-    if (!renderer || !renderer->gl_ctx) {
-        log_debug("Renderer or GL context is NULL in renderer_draw_quad");
-        return; // Or fallback rendering?
-    }
-
-    // Create a simple orthographic MVP matrix
-    // This should ideally be passed in or managed by a higher-level scene/graphic manager
-    float mvp[16] = {
-        2.0f / renderer->width, 0, 0, 0,
-        0, -2.0f / renderer->height, 0, 0,
-        0, 0, 1, 0,
-        -1, 1, 0, 1
-    };
-
-    // Delegate to gl_primitives
-    if (!gl_primitives_draw_solid_quad(renderer->shader_program_solid, x, y, width, height,
-                                      r, g, b, a, mvp, renderer->vbo_solid)) {
-        log_warn("Failed to draw solid quad using gl_primitives");
-        // Fallback?
-    }
-}
-
-// --- Delegated to text_renderer module ---
-void renderer_draw_text(Renderer* renderer, const char* text, float x, float y, float scale, unsigned int color) {
-    if (!renderer || !text) {
-        return;
-    }
-    // Delegate entirely to the text_renderer module
-    // The text_renderer module knows how to access renderer's GL context/shaders if needed
-    // via renderer_get_internal_text_data or similar mechanisms
-    extern void text_renderer_draw_text(Renderer* renderer, const char* text, float x, float y, float scale, unsigned int color); // Forward decl
-    text_renderer_draw_text(renderer, text, x, y, scale, color);
-}
-// --- End delegation to text_renderer ---
-
-// Getters for width/height (useful for MVP calculation, UI layout etc.)
-int renderer_get_width(const Renderer* renderer) {
-    return renderer ? renderer->width : 0;
-}
-
-int renderer_get_height(const Renderer* renderer) {
-    return renderer ? renderer->height : 0;
 }
