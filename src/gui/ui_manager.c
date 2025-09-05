@@ -100,8 +100,10 @@ void ui_manager_update_layout(UIManager* ui_manager, float scroll_y) {
                     if (!hunk->is_collapsed) {
                         total_height += hunk->line_count * line_height;
                     }
+                    total_height += 5.0f; // hunk_margin
                 }
             }
+            total_height += 10.0f; // file_margin
         }
     }
     ui_manager->content_height = total_height;
