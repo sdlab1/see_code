@@ -2,27 +2,23 @@
 #ifndef SEE_CODE_TEXT_RENDERER_H
 #define SEE_CODE_TEXT_RENDERER_H
 
-#include <EGL/egl.h>
-#include <GLES2/gl2.h>
-// --- Добавлено для FreeType ---
-#include <ft2build.h>
-#include FT_FREETYPE_H
-// --- Конец добавления ---
+#include <GLES2/gl2.h> // Для GLuint и т.д.
+#include <stddef.h>    // Для size_t
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // Forward declaration
-typedef struct TextRenderer TextRenderer;
 typedef struct Renderer Renderer; // From parent renderer.h
 
 /**
- * @brief Initializes the text rendering subsystem within the main renderer.
+ * @brief Initializes the text rendering subsystem.
  *
  * Attempts to initialize FreeType and load a suitable font.
  * If successful, text can be rendered using vector glyphs.
  * If FreeType fails, a fallback to simple quad rendering is used.
+ * This function should be called once during Renderer initialization.
  *
  * @param renderer The main renderer instance.
  * @param font_path_hint A hint for the path to a TrueType/OpenType font file.
@@ -35,6 +31,7 @@ int text_renderer_init(Renderer* renderer, const char* font_path_hint);
  * @brief Cleans up resources used by the text rendering subsystem.
  *
  * Frees FreeType library, faces, texture atlases, and associated data.
+ * This function should be called during Renderer destruction.
  */
 void text_renderer_cleanup(Renderer* renderer);
 
