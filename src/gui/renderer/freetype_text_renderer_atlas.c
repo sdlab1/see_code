@@ -1,15 +1,14 @@
 // src/gui/renderer/freetype_text_renderer_atlas.c
-#include "see_code/gui/renderer/text_renderer.h" // Предполагаем, что внутренняя структура объявлена тут или в приватном заголовке
+#include "see_code/gui/renderer/text_renderer.h"
 #include "see_code/utils/logger.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-// Предполагаем, что размеры определены где-то (например, в config.h или константы)
 #define TEXTURE_ATLAS_WIDTH  1024
 #define TEXTURE_ATLAS_HEIGHT 1024
-#define GLYPH_PADDING 1 // Пиксели отступа между глифами в атласе
+#define GLYPH_PADDING 1
 
 // Предполагаем, что эти структуры определены в text_renderer.c или приватном заголовке
 // struct glyph_cache_entry {
@@ -21,30 +20,23 @@
 // };
 // struct TextRendererInternalData {
 //     ...
-//     struct glyph_cache_entry glyph_cache[96]; // Для символов ASCII 32-126
+//     struct glyph_cache_entry glyph_cache[96];
 //     ...
 // };
 
-// Вспомогательная функция для обновления атласа текстур OpenGL
 static void update_texture_atlas(struct TextRendererInternalData* tr_data) {
     if (!tr_data || !tr_data->texture_atlas_id || !tr_data->texture_atlas_data) return;
-
     glBindTexture(GL_TEXTURE_2D, tr_data->texture_atlas_id);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, tr_data->atlas_width, tr_data->atlas_height, 0, GL_ALPHA, GL_UNSIGNED_BYTE, tr_data->texture_atlas_data);
-    // Предполагаем, что параметры текстуры уже установлены при инициализации
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-// Вспомогательная функция для поиска свободного места в атласе (очень простая реализация)
-// Возвращает 1, если место найдено, и заполняет pen_x, pen_y
 static int find_free_space_in_atlas(struct TextRendererInternalData* tr_data, int glyph_width, int glyph_height, int *out_x, int *out_y) {
     if (!tr_data || !out_x || !out_y) return 0;
-    // Очень простой алгоритм "упаковки в линию"
     static int current_pen_x = 0;
     static int current_pen_y = 0;
     static int max_row_height = 0;
 
-    // Проверим, помещается ли глиф в текущую строку
     if (current_pen_x + glyph_width + GLYPH_PADDING <= TEXTURE_ATLAS_WIDTH) {
         *out_x = current_pen_x;
         *out_y = current_pen_y;
@@ -55,12 +47,10 @@ static int find_free_space_in_atlas(struct TextRendererInternalData* tr_data, in
         return 1;
     }
 
-    // Не помещается, переходим на новую строку
     current_pen_x = 0;
     current_pen_y += max_row_height;
     max_row_height = 0;
 
-    // Проверим, помещается ли теперь
     if (current_pen_y + glyph_height + GLYPH_PADDING <= TEXTURE_ATLAS_HEIGHT &&
         current_pen_x + glyph_width + GLYPH_PADDING <= TEXTURE_ATLAS_WIDTH) {
         *out_x = current_pen_x;
@@ -70,11 +60,9 @@ static int find_free_space_in_atlas(struct TextRendererInternalData* tr_data, in
         return 1;
     }
 
-    // Атлас заполнен
     log_error("Texture atlas is full, cannot load more glyphs");
     return 0;
 }
-
 
 int load_glyph_into_atlas_internal(struct TextRendererInternalData* tr_data, unsigned long char_code) {
     if (!tr_data || !tr_data->is_freetype_initialized || char_code < 32 || char_code > 126) {
@@ -85,10 +73,9 @@ int load_glyph_into_atlas_internal(struct TextRendererInternalData* tr_data, uns
     if (cache_index < 0 || cache_index >= 96) return 0;
 
     if (tr_data->glyph_cache[cache_index].is_loaded) {
-        return 1; // Уже загружен
+        return 1;
     }
 
-    // Загружаем глиф в FreeType
     if (FT_Load_Char(tr_data->ft_face, char_code, FT_LOAD_RENDER)) {
         log_error("Failed to load glyph for character code %lu (U+%04lX)", char_code, char_code);
         return 0;
@@ -99,14 +86,12 @@ int load_glyph_into_atlas_internal(struct TextRendererInternalData* tr_data, uns
     int bitmap_rows = slot->bitmap.rows;
 
     if (bitmap_width == 0 || bitmap_rows == 0) {
-        // Пробельные символы (например, ' ')
         tr_data->glyph_cache[cache_index].is_loaded = 1;
         tr_data->glyph_cache[cache_index].width = bitmap_width;
         tr_data->glyph_cache[cache_index].height = bitmap_rows;
         tr_data->glyph_cache[cache_index].bearing_x = slot->bitmap_left;
         tr_data->glyph_cache[cache_index].bearing_y = slot->bitmap_top;
-        tr_data->glyph_cache[cache_index].advance_x = slot->advance.x >> 6; // В пикселях
-        // UV координаты не важны для невидимых символов
+        tr_data->glyph_cache[cache_index].advance_x = slot->advance.x >> 6;
         tr_data->glyph_cache[cache_index].u0 = 0.0f;
         tr_data->glyph_cache[cache_index].v0 = 0.0f;
         tr_data->glyph_cache[cache_index].u1 = 0.0f;
@@ -115,39 +100,33 @@ int load_glyph_into_atlas_internal(struct TextRendererInternalData* tr_data, uns
         return 1;
     }
 
-    // Найти место в атласе
     int atlas_x, atlas_y;
     if (!find_free_space_in_atlas(tr_data, bitmap_width, bitmap_rows, &atlas_x, &atlas_y)) {
-        return 0; // Нет места
+        return 0;
     }
 
-    // Копируем битмап глифа в атлас
     for (int y = 0; y < bitmap_rows; y++) {
         unsigned char *src_row = slot->bitmap.buffer + y * slot->bitmap.pitch;
         unsigned char *dst_row = tr_data->texture_atlas_data + (atlas_y + y) * tr_data->atlas_width + atlas_x;
         memcpy(dst_row, src_row, bitmap_width);
     }
 
-    // Обновить кэш
     tr_data->glyph_cache[cache_index].is_loaded = 1;
     tr_data->glyph_cache[cache_index].width = bitmap_width;
     tr_data->glyph_cache[cache_index].height = bitmap_rows;
     tr_data->glyph_cache[cache_index].bearing_x = slot->bitmap_left;
     tr_data->glyph_cache[cache_index].bearing_y = slot->bitmap_top;
-    tr_data->glyph_cache[cache_index].advance_x = slot->advance.x >> 6; // В пикселях
+    tr_data->glyph_cache[cache_index].advance_x = slot->advance.x >> 6;
     tr_data->glyph_cache[cache_index].u0 = (float)atlas_x / (float)tr_data->atlas_width;
     tr_data->glyph_cache[cache_index].v0 = (float)atlas_y / (float)tr_data->atlas_height;
     tr_data->glyph_cache[cache_index].u1 = (float)(atlas_x + bitmap_width) / (float)tr_data->atlas_width;
     tr_data->glyph_cache[cache_index].v1 = (float)(atlas_y + bitmap_rows) / (float)tr_data->atlas_height;
 
-    // Обновить OpenGL текстуру
     update_texture_atlas(tr_data);
-
     log_debug("Loaded glyph U+%04lX ('%c') into atlas at (%d,%d)", char_code, (char)char_code, atlas_x, atlas_y);
     return 1;
 }
 
-// Инициализация атласа текстур
 int text_renderer_init_atlas(struct TextRendererInternalData* tr_data) {
     if (!tr_data) return 0;
 
@@ -174,17 +153,13 @@ int text_renderer_init_atlas(struct TextRendererInternalData* tr_data) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    // Инициализируем кэш глифов
     memset(tr_data->glyph_cache, 0, sizeof(tr_data->glyph_cache));
-
     log_info("Texture atlas initialized (%dx%d)", tr_data->atlas_width, tr_data->atlas_height);
     return 1;
 }
 
-// Очистка атласа
 void text_renderer_cleanup_atlas(struct TextRendererInternalData* tr_data) {
     if (!tr_data) return;
     if (tr_data->texture_atlas_id) {
