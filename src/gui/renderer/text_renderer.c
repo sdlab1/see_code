@@ -275,8 +275,11 @@ void text_renderer_cleanup(Renderer* renderer) {
     log_debug("Text renderer cleaned up");
 }
 
+// --- РЕАЛИЗАЦИЯ text_renderer_draw_text БЕЗ ЗАГЛУШЕК ---
 void text_renderer_draw_text(Renderer* renderer, const char* text, float x, float y, float scale, unsigned int color) {
-    if (!renderer || !text) return;
+    if (!renderer || !text) {
+        return;
+    }
 
     struct TextRendererInternalData* tr_data = (struct TextRendererInternalData*)renderer->text_internal_data_private;
     if (!tr_data) {
@@ -286,6 +289,8 @@ void text_renderer_draw_text(Renderer* renderer, const char* text, float x, floa
 
     if (tr_data->is_freetype_initialized && tr_data->shader_program_textured) {
         // --- FULL FREEType RENDERING ---
+        log_debug("FreeType is initialized, rendering text: %.50s", text ? text : "(null)");
+
         float cursor_x = x;
         float cursor_y = y; // Базовая линия
 
@@ -304,13 +309,14 @@ void text_renderer_draw_text(Renderer* renderer, const char* text, float x, floa
 
             if (!load_glyph_into_atlas_internal(tr_data, c)) continue;
 
-            struct { unsigned long uc; float u0,v0,u1,v1; int w,h,bx,by,ax; int loaded; }* cached_glyph = NULL;
+            // Ищем загруженный глиф в кэше
             int cache_index = c - 32;
-            if (cache_index >= 0 && cache_index < 96 && tr_data->glyph_cache[cache_index].is_loaded) {
-                // Приводим к временной структуре для удобства доступа
-                cached_glyph = (void*)&tr_data->glyph_cache[cache_index];
+            if (cache_index < 0 || cache_index >= 96 || !tr_data->glyph_cache[cache_index].is_loaded) {
+                log_warn("Glyph U+%04X for character '%c' not found in cache after loading", c, c);
+                continue;
             }
-            if (!cached_glyph) continue;
+
+            struct { unsigned long uc; float u0,v0,u1,v1; int w,h,bx,by,ax; int loaded; }* cached_glyph = (void*)&tr_data->glyph_cache[cache_index];
 
             float x_pos = cursor_x + cached_glyph->bx * scale;
             // В OpenGL Y растет вверх, а у нас вниз. Корректируем.
@@ -320,7 +326,7 @@ void text_renderer_draw_text(Renderer* renderer, const char* text, float x, floa
 
             // Рисуем текстурированный квадрат
             // Используем gl_primitives для рисования
-            gl_primitives_draw_textured_quad(
+            if (!gl_primitives_draw_textured_quad(
                 tr_data->shader_program_textured,
                 tr_data->texture_atlas_id,
                 x_pos, y_pos, w, h,
@@ -328,7 +334,9 @@ void text_renderer_draw_text(Renderer* renderer, const char* text, float x, floa
                 color, // Передаем цвет в функцию
                 mvp,
                 tr_data->vbo // Используем общий VBO
-            );
+            )) {
+                log_warn("Failed to draw textured quad for glyph U+%04X", c);
+            }
 
             cursor_x += cached_glyph->ax * scale;
         }
@@ -347,3 +355,4 @@ void text_renderer_draw_text(Renderer* renderer, const char* text, float x, floa
         // --- КОНЕЦ FALLBACK RENDERING ---
     }
 }
+// --- КОНЕЦ РЕАЛИЗАЦИИ text_renderer_draw_text ---
