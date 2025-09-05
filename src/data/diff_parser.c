@@ -18,7 +18,7 @@ static int ensure_files_capacity(DiffData* data) {
         return 0;
     }
     // Инициализируем новую память нулями
-    memset(tmp + data->file_capacity, 0, (new_capacity - data->file_capacity) * sizeof(DiffFile));
+    memset(tmp + data->file_count, 0, (new_capacity - data->file_count) * sizeof(DiffFile));
     data->files = tmp;
     data->file_capacity = new_capacity;
     log_debug("Files array capacity increased to %zu", new_capacity);
@@ -146,8 +146,9 @@ int diff_parser_parse(DiffData* data, const char* buffer, size_t buffer_size) {
 
         // --- Новый ханк ---
         // Ищем строку вида "@@ -old_start,old_count +new_start,new_count @@ context"
-        } else if (current_file && strncmp(line, "@@", 2) == 0) {
-            log_debug("Found new hunk: %.50s", line); // Логируем первые 50 символов
+        else if (current_file && strncmp(line, "@@", 2) == 0) {
+             log_debug("Found new hunk: %.50s", line); // Логируем первые 50 символов
+
              // Добавляем новый ханк в текущий файл
             if (!ensure_hunks_capacity(current_file)) {
                 free(buffer_copy);
@@ -176,7 +177,7 @@ int diff_parser_parse(DiffData* data, const char* buffer, size_t buffer_size) {
 
         // --- Строка контента ханка ---
         // Строки, начинающиеся на ' ', '+', '-'
-        } else if (current_hunk && (line[0] == ' ' || line[0] == '+' || line[0] == '-')) {
+        else if (current_hunk && (line[0] == ' ' || line[0] == '+' || line[0] == '-')) {
             // log_debug("Found line: %.30s", line); // Логируем первые 30 символов каждой строки - может быть много
             // Добавляем строку в текущий ханк
             if (!ensure_lines_capacity(current_hunk)) {
