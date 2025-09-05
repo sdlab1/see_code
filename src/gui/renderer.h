@@ -4,12 +4,9 @@
 
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
-// --- Добавлено для FreeType ---
-#include <ft2build.h>
-#include FT_FREETYPE_H
-// --- Конец добавления ---
+// Remove freetype includes from here, they are now in text_renderer.h
 
-// Forward declaration
+// Forward declarations
 typedef struct Renderer Renderer;
 
 // Renderer functions
@@ -23,13 +20,10 @@ void renderer_resize(Renderer* renderer, int width, int height);
 void renderer_clear(float r, float g, float b, float a);
 void renderer_draw_quad(float x, float y, float width, float height,
                        float r, float g, float b, float a);
-// --- ОБНОВЛЕННАЯ ФУНКЦИЯ РЕНДЕРИНГА ТЕКСТА ---
-void renderer_draw_text(Renderer* renderer, const char* text, float x, float y, float scale, unsigned int color);
-// --- КОНЕЦ ОБНОВЛЕННОЙ ФУНКЦИИ РЕНДЕРИНГА ТЕКСТА ---
 
-// --- Добавлено для FreeType ---
-// Инициализирует FreeType и загружает шрифт
-int renderer_init_freetype(Renderer* renderer, const char* font_path);
-// --- Конец добавления ---
+// --- ОБНОВЛЕНИЕ: Объявление новой функции ---
+// Объявляем основную функцию рендеринга текста, реализация в text_renderer.c
+void renderer_draw_text(Renderer* renderer, const char* text, float x, float y, float scale, unsigned int color);
+// --- КОНЕЦ ОБНОВЛЕНИЯ ---
 
 #endif // SEE_CODE_RENDERER_H
