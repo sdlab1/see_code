@@ -57,7 +57,7 @@ static int init_freetype_internal(struct TextRendererInternalData* tr_data, cons
 
     tr_data->atlas_width = ATLAS_WIDTH_DEFAULT;
     tr_data->atlas_height = ATLAS_HEIGHT_DEFAULT;
-    tr_data->texture_atlas_data = calloc(1, tr_data->atlas_width * tr_data->atlas_width * tr_data->atlas_height);
+    tr_data->texture_atlas_data = calloc(1, tr_data->atlas_width * tr_data->atlas_height);
     if (!tr_data->texture_atlas_data) {
         log_error("Failed to allocate memory for texture atlas");
         FT_Done_Face(tr_data->ft_face);
@@ -219,12 +219,14 @@ int text_renderer_init(Renderer* renderer, const char* font_path_hint) {
         "  gl_FragColor = text_color * vec4(1.0, 1.0, 1.0, tex_color.a);\n" // Используем альфа из текстуры
         "}\n";
 
+    // Компилируем шейдерную программу для текста
     tr_data->shader_program_textured = gl_shaders_create_program_from_sources(
         textured_vertex_shader_source,
         textured_fragment_shader_source
     );
     if (!tr_data->shader_program_textured) {
         log_warn("Failed to create textured shader program for text renderer");
+        // Можно продолжить без продвинутого текстового рендеринга
     }
     log_debug("Text shader program compiled and linked successfully");
 
