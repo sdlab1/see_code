@@ -1,74 +1,207 @@
 // src/gui/renderer.c
 #include "see_code/gui/renderer.h"
+#include "see_code/gui/renderer/gl_context.h"      // Для gl_context_create/destroy/use
+#include "see_code/gui/renderer/gl_shaders.h"      // Для gl_shaders_create_program_from_sources
+#include "see_code/gui/renderer/gl_primitives.h"   // Для gl_primitives_draw_solid_quad/draw_textured_quad
+#include "see_code/gui/renderer/text_renderer.h"   // Для text_renderer_init/cleanup/draw_text
 #include "see_code/utils/logger.h"
-#include "see_code/core/config.h" // Для путей к шрифтам
+#include "see_code/core/config.h"                  // Для путей к шрифтам, цветов, размеров
 #include <stdlib.h>
 #include <string.h>
-#include <math.h> // Для ceil
+// --- Добавлено для FreeType ---
+#include <ft2build.h>
+#include FT_FREETYPE_H
+// --- Конец добавления ---
 
+// --- Внутренняя структура Renderer ---
+// Теперь Renderer стал оркестровщиком, использующим модули.
 struct Renderer {
-    EGLDisplay display;
-    EGLSurface surface;
-    EGLContext context;
-    int width;
-    int height;
-    // --- Добавлено для рендеринга примитивов ---
-    GLuint shader_program;
-    GLuint vbo;
-    GLint pos_attrib;
-    GLint color_attrib;
-    GLint mvp_uniform;
-    // --- Конец добавления ---
-    // --- Добавлено для FreeType ---
-    FT_Library ft_library;
-    FT_Face ft_face;
-    GLuint texture_atlas_id;
-    unsigned char* texture_atlas_data;
-    int atlas_width;
-    int atlas_height;
-    int is_freetype_initialized;
-    // --- Конец добавления ---
+    GLContext* gl_ctx;              // Модуль контекста
+    int width;                      // Текущая ширина
+    int height;                     // Текущая высота
+    // --- Данные для text_renderer ---
+    // В реальном проекте text_renderer может управлять своими данными внутри.
+    // Для простоты интеграции, предоставим ему доступ к gl_ctx.
+    // text_renderer_internal_data будет внутри text_renderer модуля.
 };
 
-// --- Добавлено для рендеринга примитивов ---
-// Шейдер для рисования цветных примитивов и текстур
-static const char* vertex_shader_source =
-    "attribute vec2 position;\n"
-    "attribute vec2 texcoord;\n"
-    "attribute vec4 color;\n"
-    "varying vec2 frag_texcoord;\n"
-    "varying vec4 frag_color;\n"
-    "uniform mat4 mvp;\n"
-    "void main() {\n"
-    "  gl_Position = mvp * vec4(position, 0.0, 1.0);\n"
-    "  frag_texcoord = texcoord;\n"
-    "  frag_color = color;\n"
-    "}\n";
+// --- Вспомогательные функции (могут быть статическими) ---
+// В этом файле они не нужны, так как всё делегируется модулям.
 
-static const char* fragment_shader_source_with_texture =
-    "precision mediump float;\n"
-    "varying vec2 frag_texcoord;\n"
-    "varying vec4 frag_color;\n"
-    "uniform sampler2D tex;\n"
-    "void main() {\n"
-    "  vec4 tex_color = texture2D(tex, frag_texcoord);\n"
-    "  gl_FragColor = frag_color * tex_color;\n"
-    "}\n";
+// --- Основные функции Renderer ---
 
-static const char* fragment_shader_source_no_texture =
-    "precision mediump float;\n"
-    "varying vec4 frag_color;\n"
-    "void main() {\n"
-    "  gl_FragColor = frag_color;\n"
-    "}\n";
+Renderer* renderer_create(int width, int height) {
+    log_info("Creating modular renderer with dimensions %dx%d", width, height);
 
-// --- Вспомогательные функции для шейдеров ---
-static GLuint compile_shader(GLenum type, const char* source) {
-    GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source, NULL);
-    glCompileShader(shader);
+    Renderer* renderer = malloc(sizeof(Renderer));
+    if (!renderer) {
+        log_error("Failed to allocate memory for Renderer");
+        return NULL;
+    }
+    memset(renderer, 0, sizeof(Renderer));
+    renderer->width = width;
+    renderer->height = height;
 
-    GLint compiled;
+    // 1. Инициализируем модуль контекста OpenGL
+    renderer->gl_ctx = gl_context_create(width, height);
+    if (!renderer->gl_ctx) {
+        log_error("Failed to create GL context module");
+        free(renderer);
+        return NULL;
+    }
+    log_debug("GL Context module created");
+
+    // --- Инициализация других модулей, зависящих от контекста ---
+    // 2. Инициализируем модуль рендеринга текста
+    // text_renderer_init теперь отвечает за всю внутреннюю инициализацию FreeType и т.д.
+    // Передаем renderer, чтобы text_renderer мог получить доступ к gl_ctx при необходимости.
+    if (!text_renderer_init(renderer, FREETYPE_FONT_PATH)) {
+        log_warn("Failed to initialize text renderer with primary font, trying fallback");
+        if (!text_renderer_init(renderer, TRUETYPE_FONT_PATH)) {
+             log_error("Failed to initialize text renderer with fallback font");
+             // Не критично для создания renderer, но text rendering будет ограничен
+        } else {
+            log_info("Text renderer initialized with fallback font");
+        }
+    } else {
+         log_info("Text renderer initialized with primary font");
+    }
+
+    log_info("Modular renderer created successfully");
+    return renderer;
+}
+
+void renderer_destroy(Renderer* renderer) {
+    if (!renderer) {
+        return;
+    }
+    log_info("Destroying modular renderer");
+
+    // --- Очистка в обратном порядке ---
+    // 1. Очищаем модуль рендеринга текста
+    text_renderer_cleanup(renderer);
+    log_debug("Text renderer module cleaned up");
+
+    // 2. Очищаем модуль контекста OpenGL
+    if (renderer->gl_ctx) {
+        gl_context_destroy(renderer->gl_ctx);
+        log_debug("GL Context module destroyed");
+    }
+
+    free(renderer);
+    log_info("Modular renderer destroyed");
+}
+
+int renderer_begin_frame(Renderer* renderer) {
+    if (!renderer || !renderer->gl_ctx) {
+        return 0;
+    }
+    // Делегируем начало кадра модулю контекста
+    return gl_context_begin_frame(renderer->gl_ctx);
+}
+
+int renderer_end_frame(Renderer* renderer) {
+    if (!renderer || !renderer->gl_ctx) {
+        return 0;
+    }
+    // Делегируем конец кадра модулю контекста
+    return gl_context_end_frame(renderer->gl_ctx);
+}
+
+// --- ОБНОВЛЕННАЯ ФУНКЦИЯ renderer_resize ---
+void renderer_resize(Renderer* renderer, int width, int height) {
+    if (!renderer) {
+        return;
+    }
+    log_debug("Renderer resize called: %dx%d -> %dx%d", renderer->width, renderer->height, width, height);
+
+    // 1. Обновляем сохраненные размеры
+    renderer->width = width;
+    renderer->height = height;
+
+    // 2. Передаем изменение размера модулю контекста
+    // Модуль контекста обновит viewport и, при необходимости, другие параметры.
+    if (renderer->gl_ctx) {
+        gl_context_resize(renderer->gl_ctx, width, height);
+    }
+
+    // 3. Другие модули (например, text_renderer) могут потребоваться уведомить о resize,
+    //    если они управляют собственными ресурсами, зависящими от размера.
+    //    В текущей реализации это не требуется, так как text_renderer использует
+    //    ресурсы из других модулей или не зависит от размера напрямую.
+    //    Если бы text_renderer имел свой FBO или что-то подобное, здесь был бы вызов
+    //    text_renderer_on_resize(renderer, width, height);
+
+    log_info("Renderer resized to %dx%d", width, height);
+}
+// --- КОНЕЦ ОБНОВЛЕННОЙ ФУНКЦИИ renderer_resize ---
+
+void renderer_clear(float r, float g, float b, float a) {
+    if (!renderer) { // Добавлена проверка renderer
+         log_debug("Renderer is NULL in renderer_clear");
+         return;
+    }
+    // Делегируем очистку экрана модулю контекста
+    gl_context_clear(renderer->gl_ctx, r, g, b, a);
+}
+
+void renderer_draw_quad(float x, float y, float width, float height,
+                       float r, float g, float b, float a) {
+    if (!renderer) { // Добавлена проверка renderer
+         log_debug("Renderer is NULL in renderer_draw_quad");
+         return;
+    }
+    // Создаем простую ортографическую матрицу MVP
+    // В реальном приложении её лучше получать из контекста или передавать
+    float mvp[16] = {
+         2.0f / renderer->width, 0, 0, 0,
+         0, -2.0f / renderer->height, 0, 0,
+         0, 0, 1, 0,
+        -1, 1, 0, 1
+    };
+
+    // Делегируем рисование цветного квадрата модулю примитивов
+    // Предполагаем, что у gl_primitives есть функция для этого.
+    // shader_program_solid и vbo_solid должны быть доступны.
+    // Для простоты, предположим, что gl_primitives имеет доступ к нужным шейдерам/буферам
+    // или они передаются явно. В реальном проекте это может быть реализовано по-разному.
+    // Здесь мы предполагаем, что gl_primitives_draw_solid_quad получает их извне или
+    // использует свои собственные скомпилированные шейдеры.
+    // Для демонстрации, передадим 0 для program_id и vbo_id, что заставит gl_primitives
+    // создать временные ресурсы (менее эффективно, но работает для примера).
+    // В реальном проекте, gl_primitives должен быть инициализирован с конкретными program/vbo.
+    extern GLuint gl_shaders_get_solid_program(); // Предполагаемая функция из gl_shaders
+    extern GLuint gl_primitives_get_solid_vbo();  // Предполагаемая функция из gl_primitives
+
+    gl_primitives_draw_solid_quad(
+        gl_shaders_get_solid_program(), // Получаем скомпилированную программу
+        x, y, width, height,
+        r, g, b, a,
+        mvp,
+        gl_primitives_get_solid_vbo() // Получаем общий VBO
+    );
+}
+
+// --- ОБНОВЛЕННАЯ ФУНКЦИЯ renderer_draw_text ---
+// Теперь она делегирует вызов модулю text_renderer
+void renderer_draw_text(Renderer* renderer, const char* text, float x, float y, float scale, unsigned int color) {
+    if (!renderer || !text) {
+        return;
+    }
+    // Делегируем рендеринг текста специальному модулю
+    text_renderer_draw_text(renderer, text, x, y, scale, color);
+}
+// --- КОНЕЦ ОБНОВЛЕННОЙ ФУНКЦИИ renderer_draw_text ---
+
+// --- Геттеры для ширины/высоты ---
+int renderer_get_width(const Renderer* renderer) {
+    return renderer ? renderer->width : 0;
+}
+
+int renderer_get_height(const Renderer* renderer) {
+    return renderer ? renderer->height : 0;
+}
+// --- Конец геттеров ---
     glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
     if (!compiled) {
         GLint info_len = 0;
