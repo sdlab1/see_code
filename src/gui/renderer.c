@@ -1,6 +1,7 @@
 // src/gui/renderer.c
 #include "see_code/gui/renderer.h"
 #include "see_code/utils/logger.h"
+#include "see_code/core/config.h" // Для путей к шрифтам
 #include <stdlib.h>
 #include <string.h>
 #include <math.h> // Для ceil
@@ -11,28 +12,50 @@ struct Renderer {
     EGLContext context;
     int width;
     int height;
-    // --- Добавлено для рендеринга текста ---
+    // --- Добавлено для рендеринга примитивов ---
     GLuint shader_program;
     GLuint vbo;
     GLint pos_attrib;
     GLint color_attrib;
     GLint mvp_uniform;
     // --- Конец добавления ---
+    // --- Добавлено для FreeType ---
+    FT_Library ft_library;
+    FT_Face ft_face;
+    GLuint texture_atlas_id;
+    unsigned char* texture_atlas_data;
+    int atlas_width;
+    int atlas_height;
+    int is_freetype_initialized;
+    // --- Конец добавления ---
 };
 
-// --- Добавлено для рендеринга текста ---
-// Шейдер для рисования цветных примитивов
+// --- Добавлено для рендеринга примитивов ---
+// Шейдер для рисования цветных примитивов и текстур
 static const char* vertex_shader_source =
     "attribute vec2 position;\n"
+    "attribute vec2 texcoord;\n"
     "attribute vec4 color;\n"
+    "varying vec2 frag_texcoord;\n"
     "varying vec4 frag_color;\n"
     "uniform mat4 mvp;\n"
     "void main() {\n"
     "  gl_Position = mvp * vec4(position, 0.0, 1.0);\n"
+    "  frag_texcoord = texcoord;\n"
     "  frag_color = color;\n"
     "}\n";
 
-static const char* fragment_shader_source =
+static const char* fragment_shader_source_with_texture =
+    "precision mediump float;\n"
+    "varying vec2 frag_texcoord;\n"
+    "varying vec4 frag_color;\n"
+    "uniform sampler2D tex;\n"
+    "void main() {\n"
+    "  vec4 tex_color = texture2D(tex, frag_texcoord);\n"
+    "  gl_FragColor = frag_color * tex_color;\n"
+    "}\n";
+
+static const char* fragment_shader_source_no_texture =
     "precision mediump float;\n"
     "varying vec4 frag_color;\n"
     "void main() {\n"
@@ -98,6 +121,126 @@ static GLuint create_program(const char* vertex_source, const char* fragment_sou
 }
 // --- Конец вспомогательных функций ---
 
+// --- Добавлено для FreeType ---
+int renderer_init_freetype(Renderer* renderer, const char* font_path) {
+    if (!renderer || !font_path) {
+        return 0;
+    }
+
+    // 1. Инициализируем FreeType библиотеку
+    if (FT_Init_FreeType(&renderer->ft_library)) {
+        log_error("Could not init FreeType library");
+        return 0;
+    }
+    log_debug("FreeType library initialized");
+
+    // 2. Загружаем шрифт
+    if (FT_New_Face(renderer->ft_library, font_path, 0, &renderer->ft_face)) {
+        log_error("Failed to load font from %s", font_path);
+        FT_Done_FreeType(renderer->ft_library);
+        return 0;
+    }
+    log_debug("Font loaded from %s", font_path);
+
+    // 3. Устанавливаем размер шрифта
+    FT_Set_Pixel_Sizes(renderer->ft_face, 0, 48); // 48 пикселей по высоте
+
+    // 4. Создаем атлас текстур для глифов
+    renderer->atlas_width = ATLAS_WIDTH;
+    renderer->atlas_height = ATLAS_HEIGHT;
+    renderer->texture_atlas_data = calloc(1, renderer->atlas_width * renderer->atlas_height);
+    if (!renderer->texture_atlas_data) {
+        log_error("Failed to allocate memory for texture atlas");
+        FT_Done_Face(renderer->ft_face);
+        FT_Done_FreeType(renderer->ft_library);
+        return 0;
+    }
+
+    // 5. Генерируем атлас (упрощенно: только ASCII)
+    int pen_x = 0;
+    int pen_y = 0;
+    int row_height = 0;
+    for (unsigned char c = 32; c < 127; c++) { // ASCII 32-126
+        if (FT_Load_Char(renderer->ft_face, c, FT_LOAD_RENDER)) {
+            log_warn("Failed to load glyph for character %c", c);
+            continue;
+        }
+
+        FT_GlyphSlot slot = renderer->ft_face->glyph;
+        int bitmap_width = slot->bitmap.width;
+        int bitmap_rows = slot->bitmap.rows;
+
+        // Проверяем, помещается ли глиф в текущую строку атласа
+        if (pen_x + bitmap_width >= renderer->atlas_width) {
+            pen_x = 0;
+            pen_y += row_height;
+            row_height = 0;
+        }
+
+        // Проверяем, помещается ли строка в атлас
+        if (pen_y + bitmap_rows >= renderer->atlas_height) {
+            log_warn("Texture atlas is full, cannot add more glyphs");
+            break;
+        }
+
+        // Копируем битмап глифа в атлас
+        for (int row = 0; row < bitmap_rows; row++) {
+            for (int col = 0; col < bitmap_width; col++) {
+                int atlas_index = (pen_y + row) * renderer->atlas_width + (pen_x + col);
+                int bitmap_index = row * slot->bitmap.width + col;
+                renderer->texture_atlas_data[atlas_index] = slot->bitmap.buffer[bitmap_index];
+            }
+        }
+
+        // Сохраняем UV координаты глифа (в реальной реализации это делается в отдельной структуре)
+        // Пока просто логируем
+        log_debug("Glyph '%c' placed at (%d, %d) size (%d, %d)", c, pen_x, pen_y, bitmap_width, bitmap_rows);
+
+        pen_x += bitmap_width + 1; // 1 пиксель отступа
+        if (bitmap_rows > row_height) {
+            row_height = bitmap_rows;
+        }
+    }
+
+    // 6. Создаем OpenGL текстуру из атласа
+    glGenTextures(1, &renderer->texture_atlas_id);
+    glBindTexture(GL_TEXTURE_2D, renderer->texture_atlas_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, renderer->atlas_width, renderer->atlas_height, 0, GL_ALPHA, GL_UNSIGNED_BYTE, renderer->texture_atlas_data);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    renderer->is_freetype_initialized = 1;
+    log_info("FreeType initialized successfully with font %s", font_path);
+    return 1;
+}
+
+void renderer_cleanup_freetype(Renderer* renderer) {
+    if (!renderer) return;
+
+    if (renderer->texture_atlas_id) {
+        glDeleteTextures(1, &renderer->texture_atlas_id);
+        renderer->texture_atlas_id = 0;
+    }
+    if (renderer->texture_atlas_data) {
+        free(renderer->texture_atlas_data);
+        renderer->texture_atlas_data = NULL;
+    }
+    if (renderer->ft_face) {
+        FT_Done_Face(renderer->ft_face);
+        renderer->ft_face = NULL;
+    }
+    if (renderer->ft_library) {
+        FT_Done_FreeType(renderer->ft_library);
+        renderer->ft_library = NULL;
+    }
+    renderer->is_freetype_initialized = 0;
+    log_info("FreeType resources cleaned up");
+}
+// --- Конец добавления для FreeType ---
+
 Renderer* renderer_create(int width, int height) {
     Renderer* renderer = malloc(sizeof(Renderer));
     if (!renderer) {
@@ -107,6 +250,8 @@ Renderer* renderer_create(int width, int height) {
     memset(renderer, 0, sizeof(Renderer));
     renderer->width = width;
     renderer->height = height;
+    // Инициализируем FreeType по умолчанию как неинициализированный
+    renderer->is_freetype_initialized = 0;
 
     // Initialize EGL
     renderer->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -175,18 +320,37 @@ Renderer* renderer_create(int width, int height) {
     }
 
     // --- Инициализация ресурсов для рендеринга примитивов ---
-    renderer->shader_program = create_program(vertex_shader_source, fragment_shader_source);
+    // Создаем шейдерную программу для текстурированных примитивов
+    renderer->shader_program = create_program(vertex_shader_source, fragment_shader_source_with_texture);
     if (!renderer->shader_program) {
-        log_error("Failed to create shader program for primitives");
+        log_error("Failed to create shader program for textured primitives");
         // Продолжаем, но рендеринг текста/примитивов не будет работать
     } else {
         renderer->pos_attrib = glGetAttribLocation(renderer->shader_program, "position");
         renderer->color_attrib = glGetAttribLocation(renderer->shader_program, "color");
+        // Для текстурированного шейдера добавляем атрибут texcoord
+        // GLint texcoord_attrib = glGetAttribLocation(renderer->shader_program, "texcoord");
         renderer->mvp_uniform = glGetUniformLocation(renderer->shader_program, "mvp");
 
         glGenBuffers(1, &renderer->vbo);
     }
     // --- Конец инициализации ресурсов ---
+
+    // --- Попытка инициализировать FreeType ---
+    // Пробуем сначала FreeType шрифт
+    if (renderer_init_freetype(renderer, FREETYPE_FONT_PATH)) {
+        log_info("FreeType initialized with primary font");
+    } else {
+        log_warn("Failed to initialize FreeType with primary font %s", FREETYPE_FONT_PATH);
+        // Пробуем fallback шрифт
+        if (renderer_init_freetype(renderer, TRUETYPE_FONT_PATH)) {
+             log_info("FreeType initialized with fallback font");
+        } else {
+             log_warn("Failed to initialize FreeType with fallback font %s", TRUETYPE_FONT_PATH);
+             log_warn("Text rendering will use placeholder rectangles");
+        }
+    }
+    // --- Конец попытки инициализировать FreeType ---
 
     log_info("Renderer initialized with GLES2 context");
     return renderer;
@@ -200,6 +364,10 @@ void renderer_destroy(Renderer* renderer) {
     if (renderer->shader_program) glDeleteProgram(renderer->shader_program);
     if (renderer->vbo) glDeleteBuffers(1, &renderer->vbo);
     // --- Конец освобождения ресурсов ---
+
+    // --- Освобождение ресурсов FreeType ---
+    renderer_cleanup_freetype(renderer);
+    // --- Конец освобождения ресурсов FreeType ---
 
     if (renderer->display != EGL_NO_DISPLAY) {
         eglMakeCurrent(renderer->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -309,132 +477,38 @@ void renderer_draw_quad(float x, float y, float width, float height,
 
 // --- РЕАЛИЗАЦИЯ ФУНКЦИИ РЕНДЕРИНГА ТЕКСТА ---
 void renderer_draw_text(Renderer* renderer, const char* text, float x, float y, float scale, unsigned int color) {
-    if (!renderer || !text || !renderer->shader_program) {
-        // Fallback если шейдер не скомпилировался или текст пустой
-        if (renderer && text) {
-             log_debug("Falling back to placeholder for text: %.20s", text);
-             float text_width = strlen(text) * 8.0f * scale;
-             float text_height = 16.0f * scale;
-             float r = ((color >> 16) & 0xFF) / 255.0f;
-             float g = ((color >> 8) & 0xFF) / 255.0f;
-             float b = (color & 0xFF) / 255.0f;
-             float a = ((color >> 24) & 0xFF) / 255.0f;
-             renderer_draw_quad(x, y, text_width, text_height, r, g, b, a);
-        }
+    if (!renderer || !text) {
         return;
     }
 
-    glUseProgram(renderer->shader_program);
-
-    // Матрица ортографической проекции
-    float mvp[16] = {
-        2.0f / renderer->width, 0, 0, 0,
-        0, -2.0f / renderer->height, 0, 0,
-        0, 0, 1, 0,
-        -1, 1, 0, 1
-    };
-    glUniformMatrix4fv(renderer->mvp_uniform, 1, GL_FALSE, mvp);
-
-    size_t len = strlen(text);
-    if (len == 0) {
-        glUseProgram(0);
+    // Если FreeType инициализирован, используем его
+    if (renderer->is_freetype_initialized) {
+        // TODO: Реализовать полноценный рендеринг через FreeType
+        // Это сложная часть, требующая:
+        // 1. Загрузки каждого глифа (FT_Load_Char)
+        // 2. Обновления атласа текстур (если глиф новый)
+        // 3. Расчета позиции и UV координат для каждого глифа
+        // 4. Рисования серии текстурированных квадратов
+        // Пока используем заглушку
+        log_debug("FreeType is initialized, but full implementation is TODO. Using placeholder.");
+        float text_width = strlen(text) * 8.0f * scale;
+        float text_height = 16.0f * scale;
+        float r = ((color >> 16) & 0xFF) / 255.0f;
+        float g = ((color >> 8) & 0xFF) / 255.0f;
+        float b = (color & 0xFF) / 255.0f;
+        float a = ((color >> 24) & 0xFF) / 255.0f;
+        renderer_draw_quad(x, y, text_width, text_height, r, g, b, a);
         return;
     }
 
-    // Резервируем память для вершин и цветов
-    const int VERTS_PER_CHAR = 6;
-    const int FLOATS_PER_VERT = 2;
-    const int FLOATS_PER_COLOR = 4;
-    const float char_width = 8.0f * scale;
-    const float char_height = 16.0f * scale;
-
-    GLfloat *vertices = malloc(len * VERTS_PER_CHAR * FLOATS_PER_VERT * sizeof(GLfloat));
-    GLfloat *colors = malloc(len * VERTS_PER_CHAR * FLOATS_PER_COLOR * sizeof(GLfloat));
-
-    if (!vertices || !colors) {
-        log_error("Failed to allocate memory for text rendering buffers");
-        free(vertices);
-        free(colors);
-        glUseProgram(0);
-        return;
-    }
-
-    float cursor_x = x;
-    float cursor_y = y;
-    int vert_index = 0;
-    int color_index = 0;
-
-    // Цвет текста
+    // Если FreeType не инициализирован, используем заглушку
+    log_debug("FreeType not initialized, using placeholder for text: %.20s", text);
+    float text_width = strlen(text) * 8.0f * scale;
+    float text_height = 16.0f * scale;
     float r = ((color >> 16) & 0xFF) / 255.0f;
     float g = ((color >> 8) & 0xFF) / 255.0f;
     float b = (color & 0xFF) / 255.0f;
     float a = ((color >> 24) & 0xFF) / 255.0f;
-
-    for (size_t i = 0; i < len; i++) {
-        char c = text[i];
-        if (c == '\n') {
-            cursor_x = x;
-            cursor_y += char_height;
-            continue;
-        }
-
-        // Создаем прямоугольник для символа (простая визуализация)
-        float x1 = cursor_x;
-        float y1 = cursor_y;
-        float x2 = cursor_x + char_width;
-        float y2 = cursor_y + char_height;
-
-        // Вершины прямоугольника (2 треугольника)
-        GLfloat char_verts[] = {
-            x1, y1, x2, y1, x1, y2, // Первый треугольник
-            x2, y1, x2, y2, x1, y2  // Второй треугольник
-        };
-
-        // Копируем вершины
-        memcpy(&vertices[vert_index], char_verts, sizeof(char_verts));
-        vert_index += VERTS_PER_CHAR * FLOATS_PER_VERT;
-
-        // Заполняем цвета для всех 6 вершин
-        for (int j = 0; j < VERTS_PER_CHAR; j++) {
-            colors[color_index++] = r;
-            colors[color_index++] = g;
-            colors[color_index++] = b;
-            colors[color_index++] = a;
-        }
-
-        cursor_x += char_width;
-    }
-
-    int total_vertices = vert_index / FLOATS_PER_VERT;
-
-    // Передаем данные в буфер OpenGL
-    glBindBuffer(GL_ARRAY_BUFFER, renderer->vbo);
-    glBufferData(GL_ARRAY_BUFFER,
-                 total_vertices * (FLOATS_PER_VERT + FLOATS_PER_COLOR) * sizeof(GLfloat),
-                 NULL, GL_DYNAMIC_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, total_vertices * FLOATS_PER_VERT * sizeof(GLfloat), vertices);
-    glBufferSubData(GL_ARRAY_BUFFER,
-                    total_vertices * FLOATS_PER_VERT * sizeof(GLfloat),
-                    total_vertices * FLOATS_PER_COLOR * sizeof(GLfloat),
-                    colors);
-
-    // Атрибуты вершин
-    glVertexAttribPointer(renderer->pos_attrib, FLOATS_PER_VERT, GL_FLOAT, GL_FALSE, 0, 0);
-    glEnableVertexAttribArray(renderer->pos_attrib);
-    glVertexAttribPointer(renderer->color_attrib, FLOATS_PER_COLOR, GL_FLOAT, GL_FALSE, 0,
-                          (const GLvoid*)(total_vertices * FLOATS_PER_VERT * sizeof(GLfloat)));
-    glEnableVertexAttribArray(renderer->color_attrib);
-
-    // Рисуем элементы
-    glDrawArrays(GL_TRIANGLES, 0, total_vertices);
-
-    // Очищаем состояние
-    glDisableVertexAttribArray(renderer->pos_attrib);
-    glDisableVertexAttribArray(renderer->color_attrib);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glUseProgram(0);
-
-    free(vertices);
-    free(colors);
+    renderer_draw_quad(x, y, text_width, text_height, r, g, b, a);
 }
 // --- КОНЕЦ РЕАЛИЗАЦИИ ФУНКЦИИ РЕНДЕРИНГА ТЕКСТА ---
