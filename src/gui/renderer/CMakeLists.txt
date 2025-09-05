@@ -26,4 +26,5 @@ target_link_libraries(see_code_gl_components
     dl # Для dlopen в deps_check
 )
 
-# No need to install this library separately, it's part of see
+# No need to install this library separately, it's part of see_code_gui
+# - Конец подкаталога для модулей рендерера -
