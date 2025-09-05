@@ -226,7 +226,6 @@ int text_renderer_init(Renderer* renderer, const char* font_path_hint) {
     );
     if (!tr_data->shader_program_textured) {
         log_warn("Failed to create textured shader program for text renderer");
-        // Можно продолжить без продвинутого текстового рендеринга
     }
     log_debug("Text shader program compiled and linked successfully");
 
@@ -310,7 +309,7 @@ void text_renderer_draw_text(Renderer* renderer, const char* text, float x, floa
             if (!load_glyph_into_atlas_internal(tr_data, c)) continue;
 
             // Ищем загруженный глиф в кэше
-            int cache_index = c - 32;
+            int cache_index = c - 32; // ASCII 32-126 -> индексы 0-95
             if (cache_index < 0 || cache_index >= 96 || !tr_data->glyph_cache[cache_index].is_loaded) {
                 log_warn("Glyph U+%04X for character '%c' not found in cache after loading", c, c);
                 continue;
@@ -326,7 +325,7 @@ void text_renderer_draw_text(Renderer* renderer, const char* text, float x, floa
 
             // Рисуем текстурированный квадрат
             // Используем gl_primitives для рисования
-            if (!gl_primitives_draw_textured_quad(
+            gl_primitives_draw_textured_quad(
                 tr_data->shader_program_textured,
                 tr_data->texture_atlas_id,
                 x_pos, y_pos, w, h,
@@ -334,9 +333,7 @@ void text_renderer_draw_text(Renderer* renderer, const char* text, float x, floa
                 color, // Передаем цвет в функцию
                 mvp,
                 tr_data->vbo // Используем общий VBO
-            )) {
-                log_warn("Failed to draw textured quad for glyph U+%04X", c);
-            }
+            );
 
             cursor_x += cached_glyph->ax * scale;
         }
