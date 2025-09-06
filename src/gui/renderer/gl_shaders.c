@@ -139,3 +139,65 @@ GLuint gl_shaders_create_program_from_sources(const char* vertex_source, const c
 
     return program;
 }
+
+// Global shader program and VBO for solid rendering
+static GLuint g_solid_shader_program = 0;
+static GLuint g_solid_vbo = 0;
+static int g_gl_shaders_initialized = 0;
+
+// Initialize the global solid shader program
+static int gl_shaders_init_solid(void) {
+    if (g_gl_shaders_initialized) return 1;
+    
+    g_solid_shader_program = gl_shaders_create_program_from_sources(
+        gl_shaders_solid_vertex_shader_source,
+        gl_shaders_solid_fragment_shader_source
+    );
+    
+    if (!g_solid_shader_program) {
+        log_error("Failed to create solid shader program");
+        return 0;
+    }
+    
+    // Create VBO
+    glGenBuffers(1, &g_solid_vbo);
+    if (g_solid_vbo == 0) {
+        log_error("Failed to create solid VBO");
+        glDeleteProgram(g_solid_shader_program);
+        g_solid_shader_program = 0;
+        return 0;
+    }
+    
+    g_gl_shaders_initialized = 1;
+    log_debug("Solid shader system initialized");
+    return 1;
+}
+
+// Get the solid shader program (initialize if needed)
+GLuint gl_shaders_get_solid_program(void) {
+    if (!g_gl_shaders_initialized) {
+        gl_shaders_init_solid();
+    }
+    return g_solid_shader_program;
+}
+
+// Get the solid VBO (initialize if needed)  
+GLuint gl_primitives_get_solid_vbo(void) {
+    if (!g_gl_shaders_initialized) {
+        gl_shaders_init_solid();
+    }
+    return g_solid_vbo;
+}
+
+// Cleanup function (call from renderer cleanup)
+void gl_shaders_cleanup(void) {
+    if (g_solid_shader_program) {
+        glDeleteProgram(g_solid_shader_program);
+        g_solid_shader_program = 0;
+    }
+    if (g_solid_vbo) {
+        glDeleteBuffers(1, &g_solid_vbo);
+        g_solid_vbo = 0;
+    }
+    g_gl_shaders_initialized = 0;
+}
