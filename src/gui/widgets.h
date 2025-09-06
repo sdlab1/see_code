@@ -1,15 +1,16 @@
 // src/gui/widgets.h
-// Этот файл содержит определения и интерфейсы для виджетов GUI, таких как текстовое поле и кнопка.
-
 #ifndef SEE_CODE_WIDGETS_H
 #define SEE_CODE_WIDGETS_H
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
-// --- Текстовое поле ввода ---
+// Forward declarations
+struct Renderer;
+typedef struct Renderer Renderer;
 
-// Состояние текстового поля ввода
+// --- TextInputState ---
+
 typedef struct {
     char* buffer;           // Динамический буфер для хранения текста
     size_t buffer_size;     // Общий размер выделенной памяти для буфера
@@ -18,10 +19,12 @@ typedef struct {
     int is_focused;         // Флаг, находится ли поле ввода в фокусе
     float x, y, width, height; // Позиция и размеры поля на экране
     int multiline;          // Флаг поддержки многострочного ввода (1 = да)
-    // Добавить прокрутку, если текст не помещается?
+    // TODO: Добавить прокрутку, если текст не помещается?
+    // TODO: Добавить поддержку UTF-8 для более точного перемещения курсора?
 } TextInputState;
 
 // Инициализация состояния текстового поля
+// x, y, width, height: позиция и размеры
 // Возвращает 1 при успехе, 0 при ошибке
 int text_input_init(TextInputState* input, float x, float y, float width, float height);
 
@@ -29,13 +32,22 @@ int text_input_init(TextInputState* input, float x, float y, float width, float 
 void text_input_destroy(TextInputState* input);
 
 // Обработка нажатия клавиши
-// key_code: ASCII код символа или код специальной клавиши (например, '\b' для Backspace)
+// key_code: ASCII код символа или код специальной клавиши
+//             '\b' (8)   - Backspace
+//             127        - Delete
+//             '\n' (10)  - Enter/Line Feed
+//             '\r' (13)  - Carriage Return
+//             27         - Escape
+//             0x10000    - Влево (пользовательский код)
+//             0x10001    - Вправо (пользовательский код)
+//             0x10002    - Вверх (пользовательский код)
+//             0x10003    - Вниз (пользовательский код)
 // Возвращает 1, если состояние изменилось и нужна перерисовка
 int text_input_handle_key(TextInputState* input, int key_code);
 
 // Обработка клика мыши/тачскрина
 // mouse_x, mouse_y: координаты клика
-// Возвращает 1, если фокус изменился
+// Возвращает 1, если фокус изменился или нужно перерисовать
 int text_input_handle_click(TextInputState* input, float mouse_x, float mouse_y);
 
 // Получение текста из поля ввода (для использования другими частями программы)
@@ -50,20 +62,21 @@ void text_input_set_focus(TextInputState* input, int focused);
 
 // Рендеринг текстового поля
 // renderer: указатель на инициализированный рендерер
-void text_input_render(const TextInputState* input, void* renderer); // void* для избежания циклических зависимостей
+void text_input_render(const TextInputState* input, Renderer* renderer);
 
-// --- Кнопка ---
 
-// Состояние кнопки
+// --- ButtonState ---
+
 typedef struct {
     float x, y, width, height; // Позиция и размеры кнопки
-    char* label;               // Текст на кнопке
+    char* label;               // Текст на кнопке (динамически выделенная память)
     int is_pressed;            // Флаг, нажата ли кнопка в данный момент
-    int is_hovered;            // Флаг, находится ли курсор мыши над кнопкой (для будущего использования)
-    // Можно добавить callback-функцию или ID для обработки нажатия
+    int is_hovered;            // Флаг, находится ли курсор мыши над кнопкой
+    // TODO: Можно добавить callback-функцию или ID для обработки нажатия
 } ButtonState;
 
 // Инициализация состояния кнопки
+// x, y, width, height: позиция и размеры
 // label: текст на кнопке (будет скопирован)
 // Возвращает 1 при успехе, 0 при ошибке
 int button_init(ButtonState* button, float x, float y, float width, float height, const char* label);
@@ -78,6 +91,6 @@ int button_handle_click(ButtonState* button, float mouse_x, float mouse_y);
 
 // Рендеринг кнопки
 // renderer: указатель на инициализированный рендерер
-void button_render(const ButtonState* button, void* renderer); // void* для избежания циклических зависимостей
+void button_render(const ButtonState* button, Renderer* renderer);
 
 #endif // SEE_CODE_WIDGETS_H
