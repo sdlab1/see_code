@@ -6,6 +6,11 @@
 #include "see_code/data/diff_data.h" // Для DiffData
 #include "see_code/gui/termux_gui_backend.h" // Для TermuxGUIBackend
 
+// --- Forward declarations for new widgets (New) ---
+// Предполагаем, что определения находятся в see_code/gui/widgets.h
+typedef struct TextInputState TextInputState;
+typedef struct ButtonState ButtonState;
+
 // Forward declaration
 typedef struct UIManager UIManager;
 
