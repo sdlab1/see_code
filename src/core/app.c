@@ -56,7 +56,6 @@ static int is_text_renderer_usable(const Renderer* renderer) {
     if (text_internal_data) {
         // Приводим к предполагаемому типу. Нужно убедиться, что это соответствует реальной структуре.
         // Если структура называется иначе, нужно изменить.
-        // Из prompt (20).txt видно, что структура называется TextRendererInternalData
         struct TextRendererInternalData* tr_data = (struct TextRendererInternalData*)text_internal_data;
         
         // Проверяем флаг, установленный в text_renderer_init.
