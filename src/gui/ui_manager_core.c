@@ -59,7 +59,6 @@ UIManager* ui_manager_create(Renderer* renderer) {
     ui_manager->input_field = malloc(sizeof(TextInputState));
     ui_manager->menu_button = malloc(sizeof(ButtonState));
 
-    // --- ИСПРАВЛЕНИЕ: Проверка выделения памяти для обоих виджетов ---
     if (!ui_manager->input_field || !ui_manager->menu_button) {
         log_error("ui_manager_create: Failed to allocate memory for widgets");
         // Освобождаем уже выделенную память для виджетов, если она была выделена
@@ -75,7 +74,6 @@ UIManager* ui_manager_create(Renderer* renderer) {
         free(ui_manager);
         return NULL;
     }
-    // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
     // Инициализируем текстовое поле внизу экрана
     if (!text_input_init(ui_manager->input_field, 
@@ -85,14 +83,13 @@ UIManager* ui_manager_create(Renderer* renderer) {
                          INPUT_FIELD_HEIGHT // height
                         )) {
         log_error("ui_manager_create: Failed to initialize text input widget");
-        // --- ИСПРАВЛЕНИЕ: Освобождаем ресурсы виджетов при ошибке инициализации ---
+        // Освобождаем ресурсы виджетов при ошибке инициализации
         free(ui_manager->input_field);
-        free(ui_manager->menu_button);
+        free(ui_manager->menu_button); // <-- ИСПРАВЛЕНО: Освобождаем память под menu_button
         ui_manager->input_field = NULL;
         ui_manager->menu_button = NULL;
         free(ui_manager);
         return NULL;
-        // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
     }
 
     // Устанавливаем фокус на поле ввода при запуске
@@ -107,15 +104,14 @@ UIManager* ui_manager_create(Renderer* renderer) {
                      MENU_BUTTON_LABEL // label
                     )) {
         log_error("ui_manager_create: Failed to initialize menu button widget");
-        // --- ИСПРАВЛЕНИЕ: Освобождаем ресурсы виджетов при ошибке инициализации ---
+        // Освобождаем ресурсы виджетов при ошибке инициализации
         text_input_destroy(ui_manager->input_field); // Уничтожаем состояние виджета
         free(ui_manager->input_field);
-        free(ui_manager->menu_button);
+        free(ui_manager->menu_button); // <-- ИСПРАВЛЕНО: Освобождаем память под menu_button
         ui_manager->input_field = NULL;
         ui_manager->menu_button = NULL;
         free(ui_manager);
         return NULL;
-        // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
     }
 
     // --- КОНЕЦ ИНИЦИАЛИЗАЦИИ ВИДЖЕТОВ ---
