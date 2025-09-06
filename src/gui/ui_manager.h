@@ -6,10 +6,6 @@
 #include "see_code/data/diff_data.h" // Для DiffData
 #include "see_code/gui/termux_gui_backend.h" // Для TermuxGUIBackend
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 // Forward declaration
 typedef struct UIManager UIManager;
 
@@ -30,9 +26,5 @@ typedef enum {
 
 void ui_manager_set_renderer_type(UIManager* ui_manager, RendererType type);
 RendererType ui_manager_get_renderer_type(const UIManager* ui_manager);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // SEE_CODE_UI_MANAGER_H
