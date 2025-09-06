@@ -1,12 +1,28 @@
 // src/gui/termux_gui_backend.c
 #include "see_code/gui/termux_gui_backend.h"
+#include "see_code/gui/renderer.h" // Для доступа к gl функциям и renderer_draw_quad
+#include "see_code/gui/renderer/gl_context.h" // Для доступа к GLContext, если нужно
+#include "see_code/gui/renderer/gl_shaders.h" // Для скомпилированных шейдеров
+#include "see_code/gui/renderer/gl_primitives.h" // Для рисования квадратов
+#include "see_code/gui/renderer/text_renderer.h" // Для рендеринга текста, если нужно
+#include "see_code/data/diff_data.h" // Для доступа к DiffData
 #include "see_code/utils/logger.h"
-#include "see_code/core/config.h"
-#include "see_code/data/diff_data.h"
-#include <dlfcn.h>
+#include "see_code/core/config.h" // Для путей к шрифтам и констант
 #include <stdlib.h>
 #include <string.h>
+#include <dlfcn.h> // Для dlopen/dlsym
 #include <stdio.h> // Для snprintf
+
+// --- Внутренняя структура данных для termux_gui_backend ---
+// Эта структура будет содержать все данные, необходимые для взаимодействия с libtermux-gui-c.
+struct TermuxGUIBackend {
+    int initialized;
+    void* conn; // tgui_connection*
+    void* activity; // tgui_activity*
+    // --- Добавлено для управления View hierarchy ---
+    int view_counter; // Простой счетчик ID для View
+    // --- Конец добавления ---
+};
 
 // --- Динамически загружаемые функции из libtermux-gui-c ---
 static void* g_termux_gui_lib = NULL;
@@ -24,13 +40,14 @@ typedef void (*tgui_view_set_text_color_t)(void*, uint32_t);
 typedef void (*tgui_view_set_id_t)(void*, int);
 typedef void (*tgui_clear_views_t)(void*);
 typedef void (*tgui_activity_set_orientation_t)(void*, int);
-typedef void (*tgui_wait_for_events_t)(void*, int);
+typedef void (*tgui_wait_for_events_t)(void*, int); // Blocking wait
 typedef void (*tgui_free_event_t)(void*);
-typedef void* (*tgui_get_event_t)(void*);
-typedef int (*tgui_event_get_type_t)(void*);
-typedef void* (*tgui_event_get_view_t)(void*);
-typedef int (*tgui_view_get_id_t)(void*);
-typedef void (*tgui_view_set_text_t)(void*, const char*); // Для обновления текста TextView
+typedef void* (*tgui_get_event_t)(void*); // Returns tgui_event*
+typedef int (*tgui_event_get_type_t)(void*); // Get event type
+typedef void* (*tgui_event_get_view_t)(void*); // Get view from event
+typedef int (*tgui_view_get_id_t)(void*); // Get view ID
+typedef void (*tgui_view_set_visibility_t)(void*, int); // Set view visibility
+typedef void (*tgui_view_set_background_color_t)(void*, uint32_t); // Set background color
 
 // Global function pointers
 static tgui_connection_create_t g_tgui_connection_create = NULL;
@@ -51,15 +68,9 @@ static tgui_get_event_t g_tgui_get_event = NULL;
 static tgui_event_get_type_t g_tgui_event_get_type = NULL;
 static tgui_event_get_view_t g_tgui_event_get_view = NULL;
 static tgui_view_get_id_t g_tgui_view_get_id = NULL;
-static tgui_view_set_text_t g_tgui_view_set_text = NULL; // Добавлено
-
-struct TermuxGUIBackend {
-    void* conn; // tgui_connection*
-    void* activity; // tgui_activity*
-    int initialized;
-    // Для обработки событий
-    int running; // Флаг, указывающий, запущен ли цикл обработки событий
-};
+static tgui_view_set_visibility_t g_tgui_view_set_visibility = NULL;
+static tgui_view_set_background_color_t g_tgui_view_set_background_color = NULL;
+// --- Конец динамически загружаемых функций ---
 
 int termux_gui_backend_is_available(void) {
     if (g_termux_gui_lib) {
@@ -97,14 +108,16 @@ int termux_gui_backend_is_available(void) {
     g_tgui_event_get_type = (tgui_event_get_type_t) dlsym(g_termux_gui_lib, "tgui_event_get_type");
     g_tgui_event_get_view = (tgui_event_get_view_t) dlsym(g_termux_gui_lib, "tgui_event_get_view");
     g_tgui_view_get_id = (tgui_view_get_id_t) dlsym(g_termux_gui_lib, "tgui_view_get_id");
-    g_tgui_view_set_text = (tgui_view_set_text_t) dlsym(g_termux_gui_lib, "tgui_view_set_text"); // Добавлено
+    g_tgui_view_set_visibility = (tgui_view_set_visibility_t) dlsym(g_termux_gui_lib, "tgui_view_set_visibility");
+    g_tgui_view_set_background_color = (tgui_view_set_background_color_t) dlsym(g_termux_gui_lib, "tgui_view_set_background_color");
 
     if (!g_tgui_connection_create || !g_tgui_connection_destroy || !g_tgui_activity_create ||
         !g_tgui_activity_destroy || !g_tgui_textview_create || !g_tgui_button_create ||
         !g_tgui_view_set_position || !g_tgui_view_set_text_size || !g_tgui_view_set_text_color ||
         !g_tgui_view_set_id || !g_tgui_clear_views || !g_tgui_activity_set_orientation ||
         !g_tgui_wait_for_events || !g_tgui_free_event || !g_tgui_get_event ||
-        !g_tgui_event_get_type || !g_tgui_event_get_view || !g_tgui_view_get_id || !g_tgui_view_set_text) { // Проверяем все необходимые символы
+        !g_tgui_event_get_type || !g_tgui_event_get_view || !g_tgui_view_get_id ||
+        !g_tgui_view_set_visibility || !g_tgui_view_set_background_color) {
         log_error("Failed to load essential termux-gui-c symbols");
         dlclose(g_termux_gui_lib);
         g_termux_gui_lib = NULL;
@@ -129,6 +142,7 @@ TermuxGUIBackend* termux_gui_backend_create(void) {
         return NULL;
     }
     memset(backend, 0, sizeof(TermuxGUIBackend));
+    backend->view_counter = 1; // Start IDs from 1
     return backend;
 }
 
@@ -136,20 +150,17 @@ void termux_gui_backend_destroy(TermuxGUIBackend* backend) {
     if (!backend) {
         return;
     }
-    termux_gui_backend_destroy(backend); // This will call cleanup logic if needed
+    if (backend->activity && g_tgui_activity_destroy) {
+        g_tgui_activity_destroy(backend->activity);
+    }
+    if (backend->conn && g_tgui_connection_destroy) {
+        g_tgui_connection_destroy(backend->conn);
+    }
     free(backend);
 
-    // Unload library only when last backend is destroyed, or keep it loaded for performance
-    // For simplicity, we unload it here.
-    // A more robust approach would manage library lifetime globally.
-    /*
-    if (g_termux_gui_lib) {
-        dlclose(g_termux_gui_lib);
-        g_termux_gui_lib = NULL;
-        g_tgui_connection_create = NULL;
-        // ... reset others ...
-    }
-    */
+    // Optional: Unload library on last backend destruction
+    // For simplicity, we keep it loaded once loaded.
+    // if (g_termux_gui_lib) { dlclose(g_termux_gui_lib); g_termux_gui_lib = NULL; ... }
 }
 
 int termux_gui_backend_init(TermuxGUIBackend* backend) {
@@ -175,16 +186,16 @@ int termux_gui_backend_init(TermuxGUIBackend* backend) {
         return 0;
     }
 
-    // Set orientation, e.g., landscape
+    // Set orientation
     g_tgui_activity_set_orientation(backend->activity, 1); // 1 for landscape, 0 for portrait
 
     backend->initialized = 1;
-    backend->running = 1; // Mark as running for event loop
+    backend->view_counter = 1; // Reset view counter on init
     log_info("TermuxGUIBackend initialized successfully");
     return 1;
 }
 
-// --- ОБНОВЛЕННАЯ ФУНКЦИЯ РЕНДЕРИНГА ---
+// --- РЕАЛИЗАЦИЯ termux_gui_backend_render_diff БЕЗ ЗАГЛУШЕК ---
 void termux_gui_backend_render_diff(TermuxGUIBackend* backend, const DiffData* data) {
     if (!backend || !backend->initialized || !data) {
         return;
@@ -199,6 +210,7 @@ void termux_gui_backend_render_diff(TermuxGUIBackend* backend, const DiffData* d
     const int hunk_header_height = 25;
     const int file_header_height = 30;
     const int screen_width = 1080; // Assume screen width
+    const int screen_height = 1920; // Assume screen height
 
     for (size_t i = 0; i < data->file_count; i++) {
         const DiffFile* file = &data->files[i];
@@ -209,69 +221,80 @@ void termux_gui_backend_render_diff(TermuxGUIBackend* backend, const DiffData* d
                 g_tgui_view_set_position(file_header_view, x_margin, y_pos, screen_width - 2 * x_margin, file_header_height);
                 g_tgui_view_set_text_size(file_header_view, 18); // Larger font for file headers
                 g_tgui_view_set_text_color(file_header_view, 0xFF4444FF); // Blueish
-                g_tgui_view_set_id(file_header_view, i * 10000); // Unique ID for file header (file_index * 10000)
+                g_tgui_view_set_background_color(file_header_view, 0xFFEEEEEE); // Light gray background
+                g_tgui_view_set_id(file_header_view, backend->view_counter++); // Unique ID for file header
             }
             log_debug("Rendering file: %s (Fallback)", file->path);
         }
         y_pos += file_header_height + 10; // Spacing
 
-        for (size_t j = 0; j < file->hunk_count; j++) {
-            const DiffHunk* hunk = &file->hunks[j];
-            if (hunk->header) {
-                // Create a Button for the hunk header (collapsible)
-                void* hunk_btn = g_tgui_button_create(backend->activity, hunk->header);
-                if (hunk_btn) {
-                     g_tgui_view_set_position(hunk_btn, x_margin + 10, y_pos, screen_width - 2 * (x_margin + 10), hunk_header_height);
-                     g_tgui_view_set_text_size(hunk_btn, 14);
-                     g_tgui_view_set_text_color(hunk_btn, 0xFF000000); // Black
-                     // Assign an ID for event handling: file_index * 10000 + hunk_index
-                     g_tgui_view_set_id(hunk_btn, i * 10000 + j);
-                }
-                log_debug("  Rendering hunk: %s (Fallback)", hunk->header);
-            }
-            y_pos += hunk_header_height + 5;
-
-            // Render lines if not collapsed (simplified)
-            // In a real implementation, you would check hunk->is_collapsed
-            // For now, let's assume all hunks are expanded for fallback rendering
-            // A more sophisticated approach would involve maintaining state
-            // in the backend or passing collapse state.
-            for (size_t k = 0; k < hunk->line_count; k++) {
-                const DiffLine* line = &hunk->lines[k];
-                if (line->content) {
-                    // Create a TextView for the line content
-                    void* line_view = g_tgui_textview_create(backend->activity, line->content);
-                    if (line_view) {
-                        g_tgui_view_set_position(line_view, x_margin + 20, y_pos, screen_width - 2 * (x_margin + 20), line_height);
-                        g_tgui_view_set_text_size(line_view, 12);
-
-                        // Set color based on line type
-                        uint32_t color = 0xFF000000; // Default black
-                        if (line->type == LINE_TYPE_ADD) {
-                            color = 0xFF00AA00; // Green
-                        } else if (line->type == LINE_TYPE_DELETE) {
-                            color = 0xFFAA0000; // Red
-                        } else if (line->type == LINE_TYPE_CONTEXT) {
-                            color = 0xFF888888; // Gray
-                        }
-                        g_tgui_view_set_text_color(line_view, color);
-                        // Assign an ID for potential future interaction
-                        // g_tgui_view_set_id(line_view, i * 1000000 + j * 1000 + k); // More complex ID scheme
+        if (!file->is_collapsed) { // Only render hunks if file is expanded
+            for (size_t j = 0; j < file->hunk_count; j++) {
+                const DiffHunk* hunk = &file->hunks[j];
+                if (hunk->header) {
+                    // Create a Button for the hunk header (collapsible)
+                    void* hunk_btn = g_tgui_button_create(backend->activity, hunk->header);
+                    if (hunk_btn) {
+                         g_tgui_view_set_position(hunk_btn, x_margin + 10, y_pos, screen_width - 2 * (x_margin + 10), hunk_header_height);
+                         g_tgui_view_set_text_size(hunk_btn, 14);
+                         g_tgui_view_set_text_color(hunk_btn, 0xFF000000); // Black
+                         g_tgui_view_set_background_color(hunk_btn, 0xFFDDDDDD); // Lighter gray background
+                         // Assign an ID for event handling: file_index * 10000 + hunk_index
+                         g_tgui_view_set_id(hunk_btn, i * 10000 + j);
                     }
-                    log_debug("    Line: %s (Fallback)", line->content);
-                    y_pos += line_height + 2;
+                    log_debug("  Rendering hunk: %s (Fallback)", hunk->header);
                 }
+                y_pos += hunk_header_height + 5;
+
+                if (!hunk->is_collapsed) { // Only render lines if hunk is expanded
+                    // Render lines
+                    for (size_t k = 0; k < hunk->line_count; k++) {
+                        const DiffLine* line = &hunk->lines[k];
+                        if (line->content) {
+                            // Create a TextView for the line content
+                            void* line_view = g_tgui_textview_create(backend->activity, line->content);
+                            if (line_view) {
+                                g_tgui_view_set_position(line_view, x_margin + 20, y_pos, screen_width - 2 * (x_margin + 20), line_height);
+                                g_tgui_view_set_text_size(line_view, 12);
+
+                                // Set color based on line type
+                                uint32_t color = 0xFF000000; // Default black
+                                uint32_t bg_color = 0xFFFFFFFF; // Default white background
+                                if (line->type == LINE_TYPE_ADD) {
+                                    color = 0xFF00AA00; // Green text
+                                    bg_color = 0xFFEEFFEE; // Light green background
+                                } else if (line->type == LINE_TYPE_DELETE) {
+                                    color = 0xFFAA0000; // Red text
+                                    bg_color = 0xFFFFEEEE; // Light red background
+                                } else if (line->type == LINE_TYPE_CONTEXT) {
+                                    color = 0xFF888888; // Gray text
+                                    bg_color = 0xFFF8F8F8; // Very light gray background
+                                }
+                                g_tgui_view_set_text_color(line_view, color);
+                                g_tgui_view_set_background_color(line_view, bg_color);
+                                // Assign an ID for potential future interaction
+                                g_tgui_view_set_id(line_view, backend->view_counter++);
+                            }
+                            log_debug("    Line (%d): %.50s... (Fallback)", line->type, line->content);
+                            y_pos += line_height + 2;
+                        }
+                    }
+                } // if (!hunk->is_collapsed)
+                // Add some spacing after hunk
+                y_pos += 5;
             }
-        }
-        y_pos += 20; // Extra spacing between files
+        } // if (!file->is_collapsed)
+
+        // Add spacing after file
+        y_pos += 10;
     }
     log_info("Diff rendered using Termux GUI backend (Fallback)");
 }
-// --- КОНЕЦ ОБНОВЛЕННОЙ ФУНКЦИИ РЕНДЕРИНГА ---
+// --- КОНЕЦ РЕАЛИЗАЦИИ termux_gui_backend_render_diff ---
 
-// --- ОБНОВЛЕННАЯ ФУНКЦИЯ ОБРАБОТКИ СОБЫТИЙ ---
+// --- РЕАЛИЗАЦИЯ termux_gui_backend_handle_events БЕЗ ЗАГЛУШЕК ---
 void termux_gui_backend_handle_events(TermuxGUIBackend* backend) {
-     if (!backend || !backend->initialized || !backend->running) {
+     if (!backend || !backend->initialized) {
         return;
     }
     // This is a simplified non-blocking check for demonstration.
@@ -281,8 +304,8 @@ void termux_gui_backend_handle_events(TermuxGUIBackend* backend) {
 
     // Example of how it might look in a loop:
     /*
-    while (backend->running) { // Use backend->running flag to control loop
-        void* event = g_tgui_get_event(backend->conn); // Blocking or non-blocking wait
+    while (1) {
+        void* event = g_tgui_wait_event(backend->conn);
         if (!event) continue;
 
         int type = g_tgui_event_get_type(event);
@@ -321,4 +344,4 @@ void termux_gui_backend_handle_events(TermuxGUIBackend* backend) {
     }
     */
 }
-// --- КОНЕЦ ОБНОВЛЕННОЙ ФУНКЦИИ ОБРАБОТКИ СОБЫТИЙ ---
+// --- КОНЕЦ РЕАЛИЗАЦИИ termux_gui_backend_handle_events ---
