@@ -21,6 +21,7 @@ add_library(see_code_gui
     ${SRC_DIR}/gui/ui_manager_input.c
     ${SRC_DIR}/gui/ui_manager_render.c
     ${SRC_DIR}/gui/termux_gui_backend.c
+    ${SRC_DIR}/gui/widgets.c  # <--- Добавлено
 )
 
 add_library(see_code_network ${SRC_DIR}/network/socket_server.c)
