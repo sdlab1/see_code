@@ -9,29 +9,26 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # --- Добавляем директории для поиска заголовочных файлов ---
-# ВАЖНО: Указываем путь к src/, так как заголовки там (#include "see_code/core/app.h")
 include_directories(${SRC_DIR})
 
-# --- Все библиотеки и исполняемый файл определяются прямо здесь ---
+# --- Библиотеки проекта ---
 
 # Core library
 add_library(see_code_core
     ${SRC_DIR}/core/app.c
 )
 
-# GUI library (включает все GUI-модули)
+# GUI library
 add_library(see_code_gui
     # --- Модули рендерера ---
     ${SRC_DIR}/gui/renderer/gl_context.c
     ${SRC_DIR}/gui/renderer/gl_shaders.c
     ${SRC_DIR}/gui/renderer/gl_primitives.c
-    ${SRC_DIR}/gui/renderer/text_renderer.c
-    ${SRC_DIR}/gui/renderer/text_renderer_core.c
-    ${SRC_DIR}/gui/renderer/text_renderer_draw.c
+    # --- ЕДИНЫЙ ФАЙЛ ДЛЯ РЕНДЕРИНГА ТЕКСТА ---
+    ${SRC_DIR}/gui/renderer/text_renderer.c 
     # --- Основной рендерер ---
     ${SRC_DIR}/gui/renderer.c
-    # --- UI Manager (все модули) ---
-    ${SRC_DIR}/gui/ui_manager.c
+    # --- UI Manager ---
     ${SRC_DIR}/gui/ui_manager_core.c
     ${SRC_DIR}/gui/ui_manager_input.c
     ${SRC_DIR}/gui/ui_manager_render.c
@@ -56,64 +53,34 @@ add_library(see_code_utils
     ${SRC_DIR}/utils/deps_check.c
 )
 
-# --- Линкуем необходимые библиотеки ---
-# Core library
-target_link_libraries(see_code_core
+# --- Линкуем зависимости ---
+target_link_libraries(see_code_core PUBLIC
     see_code_gui
     see_code_network
     see_code_data
     see_code_utils
-    GLESv2
-    EGL
     pthread
-    dl # Для dlopen в deps_check
 )
 
-# GUI library
-target_link_libraries(see_code_gui
+target_link_libraries(see_code_gui PUBLIC
     GLESv2
     EGL
     freetype
-    pthread
-    dl # Для dlopen в deps_check
+    dl
 )
 
-# Network library
-target_link_libraries(see_code_network
-    pthread
-)
+target_link_libraries(see_code_utils PUBLIC dl)
 
-# Data library
-# Нет внешних зависимостей, кроме стандартной библиотеки C
+# --- Исполняемый файл ---
+add_executable(see_code ${SRC_DIR}/core/main.c)
 
-# Utils library
-target_link_libraries(see_code_utils
-    dl # Для dlopen в deps_check
-)
-
-# --- Создаем исполняемый файл ---
-add_executable(see_code
-    ${SRC_DIR}/core/main.c
-)
-
-# --- Линкуем необходимые библиотеки для исполняемого файла ---
 target_link_libraries(see_code
     see_code_core
-    see_code_gui
-    see_code_network
-    see_code_data
-    see_code_utils
-    GLESv2
-    EGL
-    pthread
-    dl # Для dlopen в deps_check
-    freetype
 )
 
-# --- Устанавливаем исполняемый файл в префикс/bin ---
+# --- Установка ---
 install(TARGETS see_code DESTINATION bin)
 
-# --- Устанавливаем плагин Neovim ---
 install(
     FILES plugin/see_code.lua
     DESTINATION share/nvim/site/plugin
