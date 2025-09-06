@@ -1,14 +1,11 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
-# scripts/install.sh
-set -e # Exit immediately if a command exits with a non-zero status.
+set -e
 
-# --- Configuration ---
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 NVIM_CONFIG_DIR="${HOME}/.config/nvim"
 
-# --- Logging Functions ---
 print_status() {
     local status=$1
     local message=$2
@@ -21,7 +18,6 @@ print_status() {
     esac
 }
 
-# --- Dependency Checks ---
 check_termux() {
     if [[ ! -d "/data/data/com.termux" ]]; then
         print_status "ERROR" "This script must be run inside Termux."
@@ -33,8 +29,7 @@ check_termux() {
 check_build_deps() {
     local missing=()
     # Use clang instead of gcc, as it's standard in Termux
-    # Remove cjson check
-    for dep in clang make cmake pkg-config git; do
+    for dep in clang make cmake pkg-config git; do # Removed cjson, luarocks
         if ! command -v "$dep" &> /dev/null; then
             missing+=("$dep")
         fi
@@ -44,14 +39,12 @@ check_build_deps() {
         echo "Attempting to install them..."
         pkg install "${missing[@]}" -y || { print_status "ERROR" "Failed to install build dependencies."; exit 1; }
     fi
-    print_status "OK" "Build dependencies (clang, make, cmake, pkg-config, git) found or installed."
+    print_status "OK" "Build dependencies (clang, make, cmake, pkg-config, git) found or installed." # Removed cjson, luarocks
 }
-
 
 check_runtime_packages() {
     # Remove cjson from required packages
-    # Remove explicit check for Termux:GUI app directory
-    local required_packages=("freetype" "mesa" "termux-gui-c") # termux-gui-c library is for fallback
+    local required_packages=("freetype" "mesa" "termux-gui-c") # termux-gui-c для fallback
     local missing_packages=()
     for pkg in "${required_packages[@]}"; do
         if ! dpkg -l | grep -q "^ii  $pkg "; then
@@ -68,9 +61,16 @@ check_runtime_packages() {
     fi
 }
 
-# --- REMOVED FUNCTION: check_termux_gui_app ---
+check_termux_gui_app() {
+    if [[ ! -d "/data/data/com.termux.gui" ]]; then
+        print_status "ERROR" "Termux:GUI app is not installed."
+        echo "Please install it from F-Droid or GitHub releases."
+        echo "URL: https://github.com/termux/termux-gui/releases"
+        exit 1
+    fi
+    print_status "OK" "Termux:GUI app detected."
+}
 
-# --- Build and Install ---
 build_project() {
     cd "$PROJECT_ROOT"
     if [[ -d "build" ]]; then
@@ -108,7 +108,6 @@ install_files() {
     fi
 }
 
-# --- Configuration File ---
 create_config_example() {
     local config_example_dir="$NVIM_CONFIG_DIR"
     local config_example_file="$config_example_dir/see_code_config.lua.example"
@@ -159,14 +158,12 @@ EOF
     fi
 }
 
-# --- Main Execution ---
 main() {
     echo -e "\033[1;36m=== see_code Installation Script ===\033[0m"
     check_termux
-    check_build_deps # This no longer checks for cjson
-
-    check_runtime_packages # This no longer tries to install cjson or check for GUI app dir
-    # check_termux_gui_app # REMOVED
+    check_build_deps # This no longer checks for cjson/luarocks
+    check_runtime_packages # This no longer tries to install cjson
+    check_termux_gui_app
     if ! build_project; then
         print_status "ERROR" "Build failed. Check the output above."
         exit 1
