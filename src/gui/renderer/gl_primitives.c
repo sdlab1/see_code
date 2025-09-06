@@ -1,8 +1,11 @@
 // src/gui/renderer/gl_primitives.c
 #include "see_code/gui/renderer/gl_primitives.h"
+#include "see_code/gui/renderer/gl_shaders.h" // Для скомпилированных шейдеров
 #include "see_code/utils/logger.h"
+#include <GLES2/gl2.h>
 #include <stdlib.h>
 
+// --- Исправленный gl_primitives_draw_solid_quad ---
 int gl_primitives_draw_solid_quad(GLuint program_id, float x, float y, float width, float height,
                                  float r, float g, float b, float a,
                                  const float mvp[16], GLuint vbo_id) {
@@ -68,7 +71,9 @@ int gl_primitives_draw_solid_quad(GLuint program_id, float x, float y, float wid
 
     return 1;
 }
+// --- Конец исправленного gl_primitives_draw_solid_quad ---
 
+// --- Исправленный gl_primitives_draw_textured_quad ---
 int gl_primitives_draw_textured_quad(GLuint program_id, GLuint texture_id,
                                     float x, float y, float width, float height,
                                     float u0, float v0, float u1, float v1,
@@ -85,7 +90,7 @@ int gl_primitives_draw_textured_quad(GLuint program_id, GLuint texture_id,
     GLint texcoord_attrib = glGetAttribLocation(program_id, "texcoord");
     GLint mvp_uniform = glGetUniformLocation(program_id, "mvp");
     GLint tex_uniform = glGetUniformLocation(program_id, "tex");
-    GLint color_uniform = glGetUniformLocation(program_id, "text_color"); // Предполагаем, что шейдер использует это
+    GLint color_uniform = glGetUniformLocation(program_id, "text_color"); // Получаем uniform для цвета текста
 
     if (pos_attrib == -1 || texcoord_attrib == -1 || mvp_uniform == -1 || tex_uniform == -1) {
         log_error("Failed to get textured quad shader attribute/uniform locations");
@@ -96,13 +101,15 @@ int gl_primitives_draw_textured_quad(GLuint program_id, GLuint texture_id,
     glUniformMatrix4fv(mvp_uniform, 1, GL_FALSE, mvp);
     glUniform1i(tex_uniform, 0); // Текстура на юните 0
 
-    // Установка цвета текста
+    // Устанавливаем цвет текста как uniform
     if (color_uniform != -1) {
         float cr = ((color_rgba >> 16) & 0xFF) / 255.0f;
         float cg = ((color_rgba >> 8) & 0xFF) / 255.0f;
         float cb = (color_rgba & 0xFF) / 255.0f;
         float ca = ((color_rgba >> 24) & 0xFF) / 255.0f;
         glUniform4f(color_uniform, cr, cg, cb, ca);
+    } else {
+        log_warn("text_color uniform not found in textured shader program");
     }
 
     GLfloat vertices[] = {
@@ -151,3 +158,4 @@ int gl_primitives_draw_textured_quad(GLuint program_id, GLuint texture_id,
 
     return 1;
 }
+// --- Конец исправленного gl_primitives_draw_textured_quad ---
