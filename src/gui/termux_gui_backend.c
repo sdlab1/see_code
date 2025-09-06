@@ -135,7 +135,31 @@ int termux_gui_backend_is_available(void) {
         log_error("Failed to load essential termux-gui-c symbols");
         dlclose(g_termux_gui_lib);
         g_termux_gui_lib = NULL;
-        // ... reset others ...
+        // Обнуляем все указатели функций, чтобы предотвратить их случайный вызов в будущем
+        g_tgui_connection_create = NULL;
+        g_tgui_connection_destroy = NULL;
+        g_tgui_activity_create = NULL;
+        g_tgui_activity_destroy = NULL;
+        g_tgui_textview_create = NULL;
+        g_tgui_button_create = NULL;
+        g_tgui_edittext_create = NULL;
+        g_tgui_view_set_position = NULL;
+        g_tgui_view_set_text_size = NULL;
+        g_tgui_view_set_text_color = NULL;
+        g_tgui_view_set_id = NULL;
+        g_tgui_clear_views = NULL;
+        g_tgui_activity_set_orientation = NULL;
+        g_tgui_wait_for_events = NULL;
+        g_tgui_free_event = NULL;
+        g_tgui_get_event = NULL;
+        g_tgui_event_get_type = NULL;
+        g_tgui_event_get_view = NULL;
+        g_tgui_view_get_id = NULL;
+        g_tgui_view_set_visibility = NULL;
+        g_tgui_view_set_background_color = NULL;
+        g_tgui_view_set_hint = NULL;
+        g_tgui_view_set_focus = NULL;
+        g_tgui_view_set_text = NULL;
         return 0;
     }
 
@@ -171,6 +195,7 @@ void termux_gui_backend_destroy(TermuxGUIBackend* backend) {
     }
     if (backend->conn && g_tgui_connection_destroy) {
         g_tgui_connection_destroy(backend->conn);
+        backend->conn = NULL; // <-- ИСПРАВЛЕНО: Обнуляем указатель после уничтожения
     }
 
     free(backend);
@@ -199,7 +224,7 @@ int termux_gui_backend_init(TermuxGUIBackend* backend) {
     if (!backend->activity) {
         log_error("Failed to create termux-gui activity");
         g_tgui_connection_destroy(backend->conn);
-        backend->conn = NULL;
+        backend->conn = NULL; // <-- ИСПРАВЛЕНО: Обнуляем указатель после уничтожения
         return 0;
     }
 
@@ -435,7 +460,6 @@ void termux_gui_backend_handle_events(TermuxGUIBackend* backend) {
      if (!backend || !backend->initialized) {
         return;
     }
-
     // This is a simplified non-blocking check for demonstration.
     // A real implementation would have a dedicated thread or integrate into the main loop.
     // For now, we'll just log that event handling is active.
