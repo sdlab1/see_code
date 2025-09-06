@@ -21,7 +21,6 @@ struct UIManager {
     float content_height;
     RendererType active_renderer;
     int needs_redraw;
-    
     // --- ПОЛЯ ДЛЯ НОВЫХ ВИДЖЕТОВ ---
     TextInputState* input_field;  // Указатель на состояние текстового поля ввода
     ButtonState* menu_button;     // Указатель на состояние кнопки "..."
@@ -42,7 +41,6 @@ UIManager* ui_manager_create(Renderer* renderer) {
         log_error("Failed to allocate memory for UIManager");
         return NULL;
     }
-
     memset(ui_manager, 0, sizeof(UIManager));
     ui_manager->renderer = renderer;
     ui_manager->termux_backend = NULL; // Будет установлен позже, если используется fallback
@@ -60,17 +58,24 @@ UIManager* ui_manager_create(Renderer* renderer) {
     // Выделяем память для состояния виджетов
     ui_manager->input_field = malloc(sizeof(TextInputState));
     ui_manager->menu_button = malloc(sizeof(ButtonState));
-    
+
+    // --- ИСПРАВЛЕНИЕ: Проверка выделения памяти для обоих виджетов ---
     if (!ui_manager->input_field || !ui_manager->menu_button) {
         log_error("ui_manager_create: Failed to allocate memory for widgets");
-        // Освободить уже выделенную память для виджетов
-        if (ui_manager->input_field) free(ui_manager->input_field);
-        if (ui_manager->menu_button) free(ui_manager->menu_button);
-        ui_manager->input_field = NULL;
-        ui_manager->menu_button = NULL;
+        // Освобождаем уже выделенную память для виджетов, если она была выделена
+        if (ui_manager->input_field) {
+            free(ui_manager->input_field);
+            ui_manager->input_field = NULL;
+        }
+        if (ui_manager->menu_button) {
+            free(ui_manager->menu_button);
+            ui_manager->menu_button = NULL;
+        }
+        // Освобождаем сам ui_manager и возвращаем NULL
         free(ui_manager);
         return NULL;
     }
+    // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
     // Инициализируем текстовое поле внизу экрана
     if (!text_input_init(ui_manager->input_field, 
@@ -80,13 +85,16 @@ UIManager* ui_manager_create(Renderer* renderer) {
                          INPUT_FIELD_HEIGHT // height
                         )) {
         log_error("ui_manager_create: Failed to initialize text input widget");
+        // --- ИСПРАВЛЕНИЕ: Освобождаем ресурсы виджетов при ошибке инициализации ---
         free(ui_manager->input_field);
         free(ui_manager->menu_button);
         ui_manager->input_field = NULL;
         ui_manager->menu_button = NULL;
         free(ui_manager);
         return NULL;
+        // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
     }
+
     // Устанавливаем фокус на поле ввода при запуске
     text_input_set_focus(ui_manager->input_field, 1);
 
@@ -99,14 +107,17 @@ UIManager* ui_manager_create(Renderer* renderer) {
                      MENU_BUTTON_LABEL // label
                     )) {
         log_error("ui_manager_create: Failed to initialize menu button widget");
-        text_input_destroy(ui_manager->input_field);
+        // --- ИСПРАВЛЕНИЕ: Освобождаем ресурсы виджетов при ошибке инициализации ---
+        text_input_destroy(ui_manager->input_field); // Уничтожаем состояние виджета
         free(ui_manager->input_field);
         free(ui_manager->menu_button);
         ui_manager->input_field = NULL;
         ui_manager->menu_button = NULL;
         free(ui_manager);
         return NULL;
+        // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
     }
+
     // --- КОНЕЦ ИНИЦИАЛИЗАЦИИ ВИДЖЕТОВ ---
 
     log_info("UIManager created successfully");
