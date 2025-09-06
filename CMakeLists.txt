@@ -14,7 +14,6 @@ add_library(see_code_core ${SRC_DIR}/core/app.c)
 add_library(see_code_gui
     ${SRC_DIR}/gui/renderer/gl_context.c
     ${SRC_DIR}/gui/renderer/gl_shaders.c
-    # gl_primitives.c УДАЛЕН
     ${SRC_DIR}/gui/renderer/text_renderer.c
     ${SRC_DIR}/gui/renderer.c
     ${SRC_DIR}/gui/ui_manager_widgets.c
