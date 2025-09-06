@@ -141,7 +141,7 @@ void text_renderer_draw_text(Renderer* renderer, const char* text, float x, floa
         
         struct glyph_cache_entry* glyph = &tr_data->glyph_cache[(unsigned char)*p - 32];
         
-        // --- УЛУЧШЕНИЕ: Проверяем, помещается ли следующий символ на экране ---
+        // --- УЛУЧШЕНИЕ: Проверяем, помещается ли следующий символ ---
         if (max_width > 0 && (cursor_x + glyph->advance_x * scale) > x + max_width) {
             // Можно добавить отрисовку "..." здесь, если нужно
             break; 
