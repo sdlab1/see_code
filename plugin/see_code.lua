@@ -177,6 +177,7 @@ function M.send_diff()
         return
     end
 
+    -- [ИЗМЕНЕНО] Проверяем и запускаем сервер, даже если diff пустой
     if not check_gui_connection() then
         if get_config("auto_start_server") then
             vim.notify("see_code: GUI server not running, attempting to start...", vim.log.levels.INFO)
@@ -184,9 +185,11 @@ function M.send_diff()
                 vim.notify("see_code: Failed to start GUI server.", vim.log.levels.ERROR)
                 return
             end
+            -- Небольшая задержка после запуска
+            vim.wait(200)
             if not check_gui_connection() then
-                 vim.notify("see_code: Still cannot connect after startup.", vim.log.levels.ERROR)
-                 return
+                 vim.notify("see_code: Still cannot connect after startup.", vim.log.levels.WARN)
+                 -- Продолжаем, так как сервер может быть запущен, но еще не готов
             end
         else
              vim.notify("see_code: GUI server not running and auto-start is disabled.", vim.log.levels.ERROR)
@@ -212,17 +215,35 @@ function M.send_diff()
     local diff_text = table.concat(diff_output, "\n")
     -- --- END CHANGE ---
 
-    if diff_text == "" or diff_text:match("^%s*$") then
-        vim.notify("see_code: No changes detected", vim.log.levels.WARN)
-        return
-    end
+    -- [ИЗМЕНЕНО] Отправляем данные, даже если diff_text пустой
+    -- if diff_text == "" or diff_text:match("^%s*$") then
+    --     vim.notify("see_code: No changes detected", vim.log.levels.WARN)
+    --     return
+    -- end
 
     -- --- CHANGED: Send the raw text buffer ---
     -- The C application now expects raw bytes, not JSON.
-    if send_to_gui(diff_text) then
+    if send_to_gui(diff_text) then -- Отправляем всегда
         vim.notify(string.format("see_code: Successfully sent %d bytes of raw diff data", #diff_text))
     end
     -- --- END CHANGE ---
+end
+
+-- [НОВАЯ ФУНКЦИЯ] Принудительный запуск сервера
+function M.start_server()
+    if not user_config.socket_path then load_user_config() end
+
+    if check_gui_connection() then
+        vim.notify("see_code: Server is already running.", vim.log.levels.INFO)
+        return
+    end
+
+    vim.notify("see_code: Starting GUI server...", vim.log.levels.INFO)
+    if start_gui_server() then
+        vim.notify("see_code: Server started successfully.", vim.log.levels.INFO)
+    else
+        vim.notify("see_code: Failed to start server.", vim.log.levels.ERROR)
+    end
 end
 
 -- Status check function (remains largely the same)
@@ -263,7 +284,7 @@ function M.status()
         end
         if not gui_ok then
             if not server_running then
-                print("  - Server is not running. Try :SeeCodeDiff to start it.")
+                print("  - Server is not running. Try :SeeCodeDiff or :SeeCodeStart to start it.")
             else
                 print("  - Server is running but not accepting connections.")
             end
@@ -277,6 +298,10 @@ function M.setup()
     vim.api.nvim_create_user_command('SeeCodeDiff', M.send_diff, {
         desc = 'Send git diff to see_code GUI'
     })
+    -- [НОВАЯ КОМАНДА]
+    vim.api.nvim_create_user_command('SeeCodeStart', M.start_server, {
+        desc = 'Start the see_code GUI server'
+    })
     vim.api.nvim_create_user_command('SeeCodeStatus', M.status, {
         desc = 'Check see_code system and config status'
     })
@@ -284,7 +309,7 @@ function M.setup()
     vim.keymap.set('n', '<Leader>sd', M.send_diff, { desc = 'see_code: Send diff', silent = true })
     vim.keymap.set('n', '<Leader>ss', M.status, { desc = 'see_code: Check status' })
 
-    vim.notify("see_code: Plugin loaded. Use :SeeCodeDiff.", vim.log.levels.INFO)
+    vim.notify("see_code: Plugin loaded. Use :SeeCodeDiff or :SeeCodeStart.", vim.log.levels.INFO)
 end
 
 M.setup()
