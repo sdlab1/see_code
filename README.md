@@ -1,5 +1,5 @@
 ```markdown
-# see_code
+# see_code on android 7.0 termux
 
 Interactive Git Diff Viewer for Termux using GLES2 or Termux-GUI as a fallback.
 
