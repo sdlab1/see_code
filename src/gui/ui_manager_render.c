@@ -1,7 +1,7 @@
 // src/gui/ui_manager_render.c
 // УЛУЧШЕНИЯ:
-// 1. Цвета передаются напрямую (uint32_t) без лишних вычислений.
-// 2. Обрезка длинных строк теперь выполняется внутри рендера текста, что быстрее.
+// 1. Цвета передаются напрямую (uint32_t), а не вычисляются каждый кадр.
+// 2. Обрезка строк убрана, т.к. теперь выполняется в text_renderer.
 #include "see_code/gui/ui_manager.h"
 #include "see_code/gui/renderer.h"
 #include "see_code/gui/termux_gui_backend.h"
@@ -35,12 +35,11 @@ void ui_manager_render(UIManager* ui_manager) {
                     }
                 }
             }
-            // Пропускаем файлы, которые полностью над экраном
+            
             if (y_pos + file_height_estimate < 0) {
                 y_pos += file_height_estimate;
                 continue;
             }
-            // Прерываем отрисовку, если файлы ушли под экран
             if (y_pos > screen_height) {
                 break;
             }
@@ -64,12 +63,14 @@ void ui_manager_render(UIManager* ui_manager) {
                             DiffLine* line = &hunk->lines[k];
                             if (!line->content) continue;
 
-                            uint32_t color = COLOR_CONTEXT_LINE;
-                            if (line->type == LINE_TYPE_ADD) color = COLOR_ADD_LINE;
-                            if (line->type == LINE_TYPE_DELETE) color = COLOR_DEL_LINE;
+                            uint32_t bg_color;
+                            switch(line->type) {
+                                case LINE_TYPE_ADD:    bg_color = COLOR_ADD_LINE; break;
+                                case LINE_TYPE_DELETE: bg_color = COLOR_DEL_LINE; break;
+                                default:               bg_color = COLOR_CONTEXT_LINE; break;
+                            }
                             
-                            // Отрисовка фона строки и самого текста
-                            renderer_draw_quad(ui_manager->renderer, MARGIN + HUNK_PADDING, y_pos, screen_width - 2 * (MARGIN + HUNK_PADDING), LINE_HEIGHT, color);
+                            renderer_draw_quad(ui_manager->renderer, MARGIN + HUNK_PADDING, y_pos, screen_width - 2 * (MARGIN + HUNK_PADDING), LINE_HEIGHT, bg_color);
                             renderer_draw_text(ui_manager->renderer, line->content, MARGIN + HUNK_PADDING + 5.0f, y_pos + 16.0f, 1.0f, 0xFF000000, screen_width - 2 * (MARGIN + HUNK_PADDING) - 10.0f);
                             
                             y_pos += LINE_HEIGHT;
