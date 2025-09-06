@@ -7,7 +7,8 @@
 #include "see_code/gui/renderer/text_renderer.h" // Для рендеринга текста, если нужно
 #include "see_code/data/diff_data.h" // Для доступа к DiffData
 #include "see_code/utils/logger.h"
-#include "see_code/core/config.h" // Для путей к шрифтам и констант
+#include "see_code/core/config.h" // Для констант виджетов и других настроек
+#include "see_code/gui/widgets.h" // Для TextInputState и ButtonState
 #include <stdlib.h>
 #include <string.h>
 #include <dlfcn.h> // Для dlopen/dlsym
@@ -27,13 +28,14 @@ struct TermuxGUIBackend {
 // --- Динамически загружаемые функции из libtermux-gui-c ---
 static void* g_termux_gui_lib = NULL;
 
-// Function pointer types (минимальный необходимый набор)
+// Function pointer types (минимальный необходимый набор + новые для виджетов)
 typedef void* (*tgui_connection_create_t)(void);
 typedef void (*tgui_connection_destroy_t)(void*);
 typedef void* (*tgui_activity_create_t)(void*, int);
 typedef void (*tgui_activity_destroy_t)(void*);
 typedef void* (*tgui_textview_create_t)(void*, const char*);
 typedef void* (*tgui_button_create_t)(void*, const char*);
+typedef void* (*tgui_edittext_create_t)(void*, const char*); // Новая функция для текстового поля
 typedef void (*tgui_view_set_position_t)(void*, int, int, int, int);
 typedef void (*tgui_view_set_text_size_t)(void*, int);
 typedef void (*tgui_view_set_text_color_t)(void*, uint32_t);
@@ -48,6 +50,9 @@ typedef void* (*tgui_event_get_view_t)(void*); // Get view from event
 typedef int (*tgui_view_get_id_t)(void*); // Get view ID
 typedef void (*tgui_view_set_visibility_t)(void*, int); // Set view visibility
 typedef void (*tgui_view_set_background_color_t)(void*, uint32_t); // Set background color
+typedef void (*tgui_view_set_hint_t)(void*, const char*); // Set hint text for EditText (новая)
+typedef void (*tgui_view_set_focus_t)(void*, int); // Set focus on a view (новая)
+typedef void (*tgui_view_set_text_t)(void*, const char*); // Set text on a view (новая)
 
 // Global function pointers
 static tgui_connection_create_t g_tgui_connection_create = NULL;
@@ -56,6 +61,7 @@ static tgui_activity_create_t g_tgui_activity_create = NULL;
 static tgui_activity_destroy_t g_tgui_activity_destroy = NULL;
 static tgui_textview_create_t g_tgui_textview_create = NULL;
 static tgui_button_create_t g_tgui_button_create = NULL;
+static tgui_edittext_create_t g_tgui_edittext_create = NULL; // Новая функция
 static tgui_view_set_position_t g_tgui_view_set_position = NULL;
 static tgui_view_set_text_size_t g_tgui_view_set_text_size = NULL;
 static tgui_view_set_text_color_t g_tgui_view_set_text_color = NULL;
@@ -70,6 +76,9 @@ static tgui_event_get_view_t g_tgui_event_get_view = NULL;
 static tgui_view_get_id_t g_tgui_view_get_id = NULL;
 static tgui_view_set_visibility_t g_tgui_view_set_visibility = NULL;
 static tgui_view_set_background_color_t g_tgui_view_set_background_color = NULL;
+static tgui_view_set_hint_t g_tgui_view_set_hint = NULL; // Новая функция
+static tgui_view_set_focus_t g_tgui_view_set_focus = NULL; // Новая функция
+static tgui_view_set_text_t g_tgui_view_set_text = NULL; // Новая функция
 // --- Конец динамически загружаемых функций ---
 
 int termux_gui_backend_is_available(void) {
@@ -96,6 +105,7 @@ int termux_gui_backend_is_available(void) {
     g_tgui_activity_destroy = (tgui_activity_destroy_t) dlsym(g_termux_gui_lib, "tgui_activity_destroy");
     g_tgui_textview_create = (tgui_textview_create_t) dlsym(g_termux_gui_lib, "tgui_textview_create");
     g_tgui_button_create = (tgui_button_create_t) dlsym(g_termux_gui_lib, "tgui_button_create");
+    g_tgui_edittext_create = (tgui_edittext_create_t) dlsym(g_termux_gui_lib, "tgui_edittext_create"); // Новая функция
     g_tgui_view_set_position = (tgui_view_set_position_t) dlsym(g_termux_gui_lib, "tgui_view_set_position");
     g_tgui_view_set_text_size = (tgui_view_set_text_size_t) dlsym(g_termux_gui_lib, "tgui_view_set_text_size");
     g_tgui_view_set_text_color = (tgui_view_set_text_color_t) dlsym(g_termux_gui_lib, "tgui_view_set_text_color");
@@ -110,18 +120,22 @@ int termux_gui_backend_is_available(void) {
     g_tgui_view_get_id = (tgui_view_get_id_t) dlsym(g_termux_gui_lib, "tgui_view_get_id");
     g_tgui_view_set_visibility = (tgui_view_set_visibility_t) dlsym(g_termux_gui_lib, "tgui_view_set_visibility");
     g_tgui_view_set_background_color = (tgui_view_set_background_color_t) dlsym(g_termux_gui_lib, "tgui_view_set_background_color");
+    g_tgui_view_set_hint = (tgui_view_set_hint_t) dlsym(g_termux_gui_lib, "tgui_view_set_hint"); // Новая функция
+    g_tgui_view_set_focus = (tgui_view_set_focus_t) dlsym(g_termux_gui_lib, "tgui_view_set_focus"); // Новая функция
+    g_tgui_view_set_text = (tgui_view_set_text_t) dlsym(g_termux_gui_lib, "tgui_view_set_text"); // Новая функция
 
     if (!g_tgui_connection_create || !g_tgui_connection_destroy || !g_tgui_activity_create ||
         !g_tgui_activity_destroy || !g_tgui_textview_create || !g_tgui_button_create ||
+        !g_tgui_edittext_create || // Проверка новой функции
         !g_tgui_view_set_position || !g_tgui_view_set_text_size || !g_tgui_view_set_text_color ||
         !g_tgui_view_set_id || !g_tgui_clear_views || !g_tgui_activity_set_orientation ||
         !g_tgui_wait_for_events || !g_tgui_free_event || !g_tgui_get_event ||
         !g_tgui_event_get_type || !g_tgui_event_get_view || !g_tgui_view_get_id ||
-        !g_tgui_view_set_visibility || !g_tgui_view_set_background_color) {
+        !g_tgui_view_set_visibility || !g_tgui_view_set_background_color ||
+        !g_tgui_view_set_hint || !g_tgui_view_set_focus || !g_tgui_view_set_text) { // Проверка новых функций
         log_error("Failed to load essential termux-gui-c symbols");
         dlclose(g_termux_gui_lib);
         g_termux_gui_lib = NULL;
-        g_tgui_connection_create = NULL;
         // ... reset others ...
         return 0;
     }
@@ -291,6 +305,133 @@ void termux_gui_backend_render_diff(TermuxGUIBackend* backend, const DiffData* d
     log_info("Diff rendered using Termux GUI backend (Fallback)");
 }
 // --- КОНЕЦ РЕАЛИЗАЦИИ termux_gui_backend_render_diff ---
+
+// --- НОВАЯ ФУНКЦИЯ: Рендеринг текстового поля ввода ---
+int termux_gui_backend_render_text_input(TermuxGUIBackend* backend, const TextInputState* input) {
+    if (!backend || !backend->initialized || !input) {
+        log_error("termux_gui_backend_render_text_input: Invalid arguments");
+        return 0;
+    }
+
+    // Создаем EditText view для текстового поля ввода
+    // Используем текущий текст из состояния или пустую строку
+    const char* text_to_display = (input->buffer && input->text_length > 0) ? input->buffer : "";
+    void* edit_text_view = g_tgui_edittext_create(backend->activity, text_to_display);
+    if (!edit_text_view) {
+        log_error("termux_gui_backend_render_text_input: Failed to create EditText view");
+        return 0;
+    }
+
+    // Устанавливаем позицию и размеры из состояния виджета
+    g_tgui_view_set_position(edit_text_view, (int)input->x, (int)input->y, (int)input->width, (int)input->height);
+
+    // Устанавливаем размер текста из конфигурации
+    g_tgui_view_set_text_size(edit_text_view, FONT_SIZE_DEFAULT);
+
+    // Устанавливаем цвет текста из конфигурации
+    g_tgui_view_set_text_color(edit_text_view, INPUT_FIELD_TEXT_COLOR);
+
+    // Устанавливаем фоновый цвет из конфигурации
+    g_tgui_view_set_background_color(edit_text_view, INPUT_FIELD_BACKGROUND_COLOR);
+
+    // Устанавливаем подсказку (placeholder) из конфигурации, если текст пуст
+    if (input->text_length == 0) {
+        g_tgui_view_set_hint(edit_text_view, INPUT_FIELD_PLACEHOLDER_TEXT);
+        // Цвет подсказки можно установить, если библиотека это поддерживает
+        // g_tgui_view_set_hint_color(edit_text_view, INPUT_FIELD_PLACEHOLDER_COLOR);
+    }
+
+    // Устанавливаем фокус, если поле в фокусе
+    if (input->is_focused) {
+        g_tgui_view_set_focus(edit_text_view, 1);
+    }
+
+    // Устанавливаем уникальный ID для обработки событий
+    // Для простоты используем фиксированный ID, но в реальном приложении лучше использовать
+    // уникальный идентификатор, связанный с состоянием input или системой управления ID
+    g_tgui_view_set_id(edit_text_view, 999999); // Специальный ID для текстового поля
+
+    log_debug("Text input rendered using Termux GUI backend (Fallback)");
+    return 1;
+}
+// --- КОНЕЦ НОВОЙ ФУНКЦИИ ---
+
+// --- НОВАЯ ФУНКЦИЯ: Рендеринг кнопки ---
+int termux_gui_backend_render_button(TermuxGUIBackend* backend, const ButtonState* button) {
+    if (!backend || !backend->initialized || !button) {
+        log_error("termux_gui_backend_render_button: Invalid arguments");
+        return 0;
+    }
+
+    // Создаем Button view с текстом из состояния кнопки
+    const char* label_to_display = button->label ? button->label : "";
+    void* button_view = g_tgui_button_create(backend->activity, label_to_display);
+    if (!button_view) {
+        log_error("termux_gui_backend_render_button: Failed to create Button view");
+        return 0;
+    }
+
+    // Устанавливаем позицию и размеры из состояния виджета
+    g_tgui_view_set_position(button_view, (int)button->x, (int)button->y, (int)button->width, (int)button->height);
+
+    // Устанавливаем размер текста из конфигурации
+    g_tgui_view_set_text_size(button_view, FONT_SIZE_DEFAULT); // Можно использовать отдельную константу для кнопок
+
+    // Устанавливаем цвет текста из конфигурации
+    g_tgui_view_set_text_color(button_view, MENU_BUTTON_TEXT_COLOR);
+
+    // Устанавливаем фоновый цвет в зависимости от состояния из конфигурации
+    uint32_t bg_color = MENU_BUTTON_BACKGROUND_COLOR_DEFAULT;
+    if (button->is_pressed) {
+        bg_color = MENU_BUTTON_BACKGROUND_COLOR_PRESSED;
+    } else if (button->is_hovered) {
+        bg_color = MENU_BUTTON_BACKGROUND_COLOR_HOVER;
+    }
+    g_tgui_view_set_background_color(button_view, bg_color);
+
+    // Устанавливаем уникальный ID для обработки событий
+    // Для простоты используем фиксированный ID, но в реальном приложении лучше использовать
+    // уникальный идентификатор, связанный с состоянием button или системой управления ID
+    g_tgui_view_set_id(button_view, 999998); // Специальный ID для кнопки
+
+    log_debug("Button rendered using Termux GUI backend (Fallback)");
+    return 1;
+}
+// --- КОНЕЦ НОВОЙ ФУНКЦИИ ---
+
+// --- НОВАЯ ФУНКЦИЯ: Обновление текстового поля ввода ---
+int termux_gui_backend_update_text_input(TermuxGUIBackend* backend, const TextInputState* input) {
+    if (!backend || !backend->initialized || !input) {
+        log_error("termux_gui_backend_update_text_input: Invalid arguments");
+        return 0;
+    }
+
+    // В Termux-GUI нет прямого способа обновить существующий view по ID
+    // Поэтому мы пересоздаем все views
+    // Это упрощенная реализация - в реальном приложении нужно более сложное управление view hierarchy
+    // или хранить указатель на view внутри состояния виджета
+    log_debug("termux_gui_backend_update_text_input: Update requires full re-render (Fallback)");
+    // Возвращаем успех, так как обновление будет выполнено при следующем полном рендеринге
+    return 1;
+}
+// --- КОНЕЦ НОВОЙ ФУНКЦИИ ---
+
+// --- НОВАЯ ФУНКЦИЯ: Обновление кнопки ---
+int termux_gui_backend_update_button(TermuxGUIBackend* backend, const ButtonState* button) {
+    if (!backend || !backend->initialized || !button) {
+        log_error("termux_gui_backend_update_button: Invalid arguments");
+        return 0;
+    }
+
+    // В Termux-GUI нет прямого способа обновить существующий view по ID
+    // Поэтому мы пересоздаем все views
+    // Это упрощенная реализация - в реальном приложении нужно более сложное управление view hierarchy
+    // или хранить указатель на view внутри состояния виджета
+    log_debug("termux_gui_backend_update_button: Update requires full re-render (Fallback)");
+    // Возвращаем успех, так как обновление будет выполнено при следующем полном рендеринге
+    return 1;
+}
+// --- КОНЕЦ НОВОЙ ФУНКЦИИ ---
 
 // --- РЕАЛИЗАЦИЯ termux_gui_backend_handle_events БЕЗ ЗАГЛУШЕК ---
 void termux_gui_backend_handle_events(TermuxGUIBackend* backend) {
