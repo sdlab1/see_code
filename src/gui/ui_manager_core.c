@@ -61,16 +61,11 @@ UIManager* ui_manager_create(Renderer* renderer) {
 
     if (!ui_manager->input_field || !ui_manager->menu_button) {
         log_error("ui_manager_create: Failed to allocate memory for widgets");
-        // Освобождаем уже выделенную память для виджетов, если она была выделена
-        if (ui_manager->input_field) {
-            free(ui_manager->input_field);
-            ui_manager->input_field = NULL;
-        }
-        if (ui_manager->menu_button) {
-            free(ui_manager->menu_button);
-            ui_manager->menu_button = NULL;
-        }
-        // Освобождаем сам ui_manager и возвращаем NULL
+        // Освободить уже выделенную память для виджетов
+        if (ui_manager->input_field) free(ui_manager->input_field);
+        if (ui_manager->menu_button) free(ui_manager->menu_button);
+        ui_manager->input_field = NULL;
+        ui_manager->menu_button = NULL;
         free(ui_manager);
         return NULL;
     }
@@ -83,13 +78,17 @@ UIManager* ui_manager_create(Renderer* renderer) {
                          INPUT_FIELD_HEIGHT // height
                         )) {
         log_error("ui_manager_create: Failed to initialize text input widget");
-        // Освобождаем ресурсы виджетов при ошибке инициализации
+        // --- ИСПРАВЛЕНИЕ 3: Корректная очистка при ошибке ---
+        // text_input_destroy вызывается ТОЛЬКО если text_input_init вернул успех.
+        // В данном случае text_input_init вернул 0, значит, внутренние ресурсы TextInputState не были выделены.
+        // Поэтому мы просто освобождаем саму структуру.
         free(ui_manager->input_field);
-        free(ui_manager->menu_button); // <-- ИСПРАВЛЕНО: Освобождаем память под menu_button
+        free(ui_manager->menu_button);
         ui_manager->input_field = NULL;
         ui_manager->menu_button = NULL;
         free(ui_manager);
         return NULL;
+        // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
     }
 
     // Устанавливаем фокус на поле ввода при запуске
@@ -104,14 +103,17 @@ UIManager* ui_manager_create(Renderer* renderer) {
                      MENU_BUTTON_LABEL // label
                     )) {
         log_error("ui_manager_create: Failed to initialize menu button widget");
-        // Освобождаем ресурсы виджетов при ошибке инициализации
-        text_input_destroy(ui_manager->input_field); // Уничтожаем состояние виджета
+        // --- ИСПРАВЛЕНИЕ 3: Корректная очистка при ошибке ---
+        // text_input_init для input_field прошел успешно, поэтому нужно вызвать text_input_destroy.
+        text_input_destroy(ui_manager->input_field);
+        // Освобождаем память под структуры виджетов
         free(ui_manager->input_field);
-        free(ui_manager->menu_button); // <-- ИСПРАВЛЕНО: Освобождаем память под menu_button
+        free(ui_manager->menu_button);
         ui_manager->input_field = NULL;
         ui_manager->menu_button = NULL;
         free(ui_manager);
         return NULL;
+        // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
     }
 
     // --- КОНЕЦ ИНИЦИАЛИЗАЦИИ ВИДЖЕТОВ ---
