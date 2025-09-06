@@ -27,9 +27,9 @@
 #define COLOR_CONTEXT_LINE 0xFF888888
 
 // --- Font Sizes ---
-#define FONT_SIZE_DEFAULT 14  // Исправлено: добавлено определение
-#define ATLAS_WIDTH_DEFAULT 1024  // Исправлено: добавлено определение
-#define ATLAS_HEIGHT_DEFAULT 1024  // Исправлено: добавлено определение
+#define FONT_SIZE_DEFAULT 14
+#define ATLAS_WIDTH_DEFAULT 1024
+#define ATLAS_HEIGHT_DEFAULT 1024
 
 // --- Max Message Size ---
 #define MAX_MESSAGE_SIZE (50 * 1024 * 1024) // 50MB
@@ -46,9 +46,9 @@ typedef struct {
 #define LOG_FILE_PATH "/data/data/com.termux/files/usr/tmp/see_code.log"
 #define LOG_BUFFER_SIZE 1024
 
-// --- UI Widget Configuration (New) ---
+// --- UI Widget Configuration ---
 // Текстовое поле ввода
-#define INPUT_FIELD_HEIGHT 60.0f // Примерно 3 строки
+#define INPUT_FIELD_HEIGHT 60.0f
 #define INPUT_FIELD_PLACEHOLDER_TEXT "type here"
 #define INPUT_FIELD_PLACEHOLDER_COLOR 0xFF888888 // Серый
 #define INPUT_FIELD_TEXT_COLOR 0xFF000000       // Черный
@@ -65,5 +65,13 @@ typedef struct {
 #define MENU_BUTTON_BACKGROUND_COLOR_DEFAULT 0xFFDDDDDD // Светло-серый
 #define MENU_BUTTON_BACKGROUND_COLOR_HOVER 0xFFEEEEEE   // Еще светлее
 #define MENU_BUTTON_BACKGROUND_COLOR_PRESSED 0xFFAAAAAA // Темнее
+#define MENU_BUTTON_BORDER_COLOR 0xFF888888             // Серый для рамки
+
+// UI Margins
+#define UI_MARGIN 10.0f
+
+// Определения дефолтных размеров окна
+#define DEFAULT_WINDOW_WIDTH WINDOW_WIDTH_DEFAULT
+#define DEFAULT_WINDOW_HEIGHT WINDOW_HEIGHT_DEFAULT
 
 #endif // SEE_CODE_CONFIG_H
