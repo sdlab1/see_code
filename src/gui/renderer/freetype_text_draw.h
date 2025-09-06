@@ -5,10 +5,6 @@
 #include <GLES2/gl2.h> // Для GLuint и т.д.
 #include <stddef.h>    // Для size_t
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 // Forward declaration
 typedef struct Renderer Renderer; // From parent renderer.h
 
@@ -26,9 +22,5 @@ typedef struct Renderer Renderer; // From parent renderer.h
  * @param color The color in 0xAARRGGBB format.
  */
 void freetype_text_draw(Renderer* renderer, const char* text, float x, float y, float scale, unsigned int color);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // SEE_CODE_FREETYPE_TEXT_DRAW_H
