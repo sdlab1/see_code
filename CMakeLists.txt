@@ -17,6 +17,7 @@ add_library(see_code_gui
     # gl_primitives.c УДАЛЕН
     ${SRC_DIR}/gui/renderer/text_renderer.c
     ${SRC_DIR}/gui/renderer.c
+    ${SRC_DIR}/gui/ui_manager_widgets.c
     ${SRC_DIR}/gui/ui_manager_core.c
     ${SRC_DIR}/gui/ui_manager_input.c
     ${SRC_DIR}/gui/ui_manager_render.c
