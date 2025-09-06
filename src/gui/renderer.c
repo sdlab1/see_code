@@ -1,6 +1,4 @@
 // src/gui/renderer.c
-// ​Это ядро оптимизации. 
-// Вся логика батчинга находится здесь.
 #include "see_code/gui/renderer.h"
 #include "see_code/gui/renderer/gl_context.h"
 #include "see_code/gui/renderer/gl_shaders.h"
@@ -199,7 +197,7 @@ void add_quad_to_batch(Renderer* renderer, float x, float y, float w, float h, f
     }
     renderer->current_texture = texture_id;
 
-    // Конвертируем цвет из 0xAARRGGBB в 0xAABBGGRR (little-endian)
+    // Конвертируем цвет из 0xAARRGGBB в 0xAABBGGRR (для OpenGL little-endian)
     uint32_t final_color = (color & 0xFF00FF00) | ((color >> 16) & 0xFF) | ((color & 0xFF) << 16);
 
     BatchVertex* v = renderer->vertices + renderer->vertex_count;
@@ -225,8 +223,8 @@ void renderer_draw_textured_quad(Renderer* renderer, float x, float y, float w, 
     add_quad_to_batch(renderer, x, y, w, h, u0, v0, u1, v1, color, texture_id);
 }
 
-void renderer_draw_text(Renderer* renderer, const char* text, float x, float y, float scale, uint32_t color) {
-    text_renderer_draw_text(renderer, text, x, y, scale, color);
+void renderer_draw_text(Renderer* renderer, const char* text, float x, float y, float scale, uint32_t color, float max_width) {
+    text_renderer_draw_text(renderer, text, x, y, scale, color, max_width);
 }
 
 int renderer_get_width(const Renderer* renderer) {
