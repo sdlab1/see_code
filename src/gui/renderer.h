@@ -1,4 +1,6 @@
 // src/gui/renderer.h
+// ​Интерфейс рендерера изменился,
+// чтобы поддерживать батчинг.
 #ifndef SEE_CODE_RENDERER_H
 #define SEE_CODE_RENDERER_H
 
