@@ -150,6 +150,7 @@ cleanup:
     return 0;
 }
 
+// --- ИЗМЕНЕННАЯ ФУНКЦИЯ ---
 int app_update(void) {
     if (!g_app.initialized || !g_app.running) {
         return 0;
@@ -157,38 +158,34 @@ int app_update(void) {
 
     pthread_mutex_lock(&g_app.state_mutex);
 
-    // Handle renderer updates based on active renderer type
     if (ui_manager_get_renderer_type(g_app.ui_manager) == RENDERER_TYPE_GLES2 && g_app.renderer) {
-        if (!renderer_begin_frame(g_app.renderer)) {
-            log_error("Failed to begin renderer frame");
-            pthread_mutex_unlock(&g_app.state_mutex);
-            return 0;
-        }
+        // Начинаем формирование батча
+        renderer_begin_frame(g_app.renderer);
+        // Очищаем фон
+        renderer_clear(g_app.renderer, 0.06f, 0.06f, 0.06f, 1.0f);
     }
-    // Для Termux-GUI begin_frame не нужен
 
-    // Update UI if needed
     if (g_app.needs_redraw) {
         ui_manager_update_layout(g_app.ui_manager, g_app.scroll_y);
         g_app.needs_redraw = 0;
     }
 
-    // Render UI
+    // Эта функция теперь не рисует, а только добавляет вершины в батч
     ui_manager_render(g_app.ui_manager);
 
-    // End frame
     if (ui_manager_get_renderer_type(g_app.ui_manager) == RENDERER_TYPE_GLES2 && g_app.renderer) {
+        // Завершаем кадр, что вызовет flush и swap buffers
         if (!renderer_end_frame(g_app.renderer)) {
             log_error("Failed to end renderer frame");
             pthread_mutex_unlock(&g_app.state_mutex);
             return 0;
         }
     }
-    // Для Termux-GUI end_frame не нужен
 
     pthread_mutex_unlock(&g_app.state_mutex);
     return 1;
 }
+// --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
 void app_shutdown(void) {
     log_info("Initiating application shutdown");
