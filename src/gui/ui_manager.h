@@ -23,6 +23,9 @@ void ui_manager_render(UIManager* ui_manager);
 int ui_manager_handle_touch(UIManager* ui_manager, float x, float y);
 float ui_manager_get_content_height(UIManager* ui_manager);
 
+// --- НОВАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ КЛАВИШ (New) ---
+void ui_manager_handle_key(UIManager* ui_manager, int key_code);
+
 // Renderer type management
 typedef enum {
     RENDERER_TYPE_GLES2,
