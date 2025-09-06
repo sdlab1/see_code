@@ -1,6 +1,6 @@
 // src/gui/termux_gui_backend.h
 #ifndef SEE_CODE_TERMUX_GUI_BACKEND_H
-#define SEE_CODE_TERMUX_GUI_BACKEND_H
+#define SEE_CODE_TERMUX_BACKEND_H
 
 #include <stddef.h> // for size_t
 #include "see_code/data/diff_data.h" // Для DiffData
@@ -99,23 +99,5 @@ int termux_gui_backend_render_text_input(TermuxGUIBackend* backend, const TextIn
  * @return 1 при успехе, 0 при ошибке.
  */
 int termux_gui_backend_render_button(TermuxGUIBackend* backend, const ButtonState* button);
-
-/**
- * @brief Обновляет состояние текстового поля в Termux-GUI (например, текст, фокус).
- * 
- * @param backend Указатель на активный TermuxGUIBackend.
- * @param input Указатель на состояние текстового поля.
- * @return 1 при успехе, 0 при ошибке.
- */
-int termux_gui_backend_update_text_input(TermuxGUIBackend* backend, const TextInputState* input);
-
-/**
- * @brief Обновляет состояние кнопки в Termux-GUI (например, нажата/отпущена).
- * 
- * @param backend Указатель на активный TermuxGUIBackend.
- * @param button Указатель на состояние кнопки.
- * @return 1 при успехе, 0 при ошибке.
- */
-int termux_gui_backend_update_button(TermuxGUIBackend* backend, const ButtonState* button);
 
 #endif // SEE_CODE_TERMUX_GUI_BACKEND_H
