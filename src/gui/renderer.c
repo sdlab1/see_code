@@ -1,4 +1,6 @@
 // src/gui/renderer.c
+// ​Это ядро оптимизации. 
+// Вся логика батчинга находится здесь.
 #include "see_code/gui/renderer.h"
 #include "see_code/gui/renderer/gl_context.h"
 #include "see_code/gui/renderer/gl_shaders.h"
