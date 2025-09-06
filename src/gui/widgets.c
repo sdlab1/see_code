@@ -1,15 +1,14 @@
 // src/gui/widgets.c
-// Реализация виджетов GUI: текстовое поле и кнопка.
-
 #include "see_code/gui/widgets.h"
-#include "see_code/utils/logger.h" // Для логирования
-#include "see_code/core/config.h"  // Для констант, если понадобятся
-#include "see_code/gui/renderer.h" // Для рендеринга (нужно будет решить проблему циклической зависимости)
+#include "see_code/gui/renderer.h"
+#include "see_code/utils/logger.h"
+#include "see_code/core/config.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h> // Для snprintf, если нужно
+#include <math.h>  // Для fminf, fmaxf
 
-// --- Текстовое поле ввода ---
+// --- TextInputState ---
 
 int text_input_init(TextInputState* input, float x, float y, float width, float height) {
     if (!input) {
@@ -30,7 +29,7 @@ int text_input_init(TextInputState* input, float x, float y, float width, float 
     input->buffer = malloc(input->buffer_size);
     if (!input->buffer) {
         log_error("text_input_init: Failed to allocate initial buffer of size %zu", input->buffer_size);
-        // Обнуляем поля, чтобы text_input_destroy не пыталась освободить неправильный указатель
+        // Обнуляем поля, чтобы text_input_destroy не пытался освободить неправильный указатель
         memset(input, 0, sizeof(TextInputState));
         return 0;
     }
@@ -158,7 +157,7 @@ int text_input_handle_key(TextInputState* input, int key_code) {
              input->cursor_pos--;
              changed = 1; // Даже если только курсор переместился
          }
-    } else if (key_code == 0x10001) { // Вправо (предположим, это специальный код)
+    } else if (key_code == 0x10010) { // Вправо (предположим, это специальный код)
          if (input->cursor_pos < input->text_length) {
              input->cursor_pos++;
              changed = 1;
@@ -217,26 +216,19 @@ void text_input_set_focus(TextInputState* input, int focused) {
 
 // Вспомогательная функция для получения времени в миллисекундах (заглушка)
 // В реальном коде нужно использовать функцию из app.c или другую
-static unsigned long long get_time_ms_stub() {
-    // Это заглушка. В реальном коде нужно получить реальное время.
-    static unsigned long long stub_time = 0;
-    stub_time += 16; // Примерно 60 FPS
-    return stub_time;
-}
+// Предполагаем, что есть функция app_get_time_millis()
+extern unsigned long long app_get_time_millis(void); // Предварительное объявление
 
-void text_input_render(const TextInputState* input, void* renderer) {
+void text_input_render(const TextInputState* input, Renderer* renderer) {
     if (!input || !renderer) {
         return;
     }
 
-    Renderer* rend = (Renderer*)renderer; // Приведение типа
+    // 1. Отрисовка фона поля ввода
+    renderer_draw_quad(renderer, input->x, input->y, input->width, input->height, INPUT_FIELD_BACKGROUND_COLOR);
 
-    // 1. Отрисовка фона поля ввода (например, белый прямоугольник)
-    renderer_draw_quad(rend, input->x, input->y, input->width, input->height, 0xFFFFFFFF); // Белый
-
-    // 2. Отрисовка рамки поля ввода (например, серый прямоугольник чуть меньшего размера)
-    // Или использовать отдельную логику для рамки
-    renderer_draw_quad(rend, input->x, input->y, input->width, input->height, 0xFF888888); // Серый
+    // 2. Отрисовка рамки поля ввода
+    renderer_draw_quad(renderer, input->x, input->y, input->width, input->height, INPUT_FIELD_BORDER_COLOR);
 
     // 3. Определение области для текста (с отступами)
     const float padding = 5.0f;
@@ -249,30 +241,30 @@ void text_input_render(const TextInputState* input, void* renderer) {
     if (input->text_length > 0) {
         // Отрисовываем текст
         // TODO: Обработка многострочности и прокрутки
-        renderer_draw_text(rend, input->buffer, text_area_x, text_area_y + 15.0f, 1.0f, 0xFF000000, text_area_width); // Черный текст
+        renderer_draw_text(renderer, input->buffer, text_area_x, text_area_y + 15.0f, 1.0f, INPUT_FIELD_TEXT_COLOR, text_area_width);
     } else if (input->is_focused) {
         // Отрисовываем серую подсказку, если текста нет и поле в фокусе
-        renderer_draw_text(rend, "type here", text_area_x, text_area_y + 15.0f, 1.0f, 0xFF888888, text_area_width); // Серый текст
+        renderer_draw_text(renderer, INPUT_FIELD_PLACEHOLDER_TEXT, text_area_x, text_area_y + 15.0f, 1.0f, INPUT_FIELD_PLACEHOLDER_COLOR, text_area_width);
     }
 
     // 5. Отрисовка курсора, если поле в фокусе
     if (input->is_focused) {
         // Простая логика мерцания: курсор виден 500мс, невидим 500мс
-        unsigned long long current_time_ms = get_time_ms_stub(); // TODO: Заменить на реальное время
-        int cursor_visible = (current_time_ms / 500) % 2;
+        unsigned long long current_time_ms = app_get_time_millis();
+        int cursor_visible = (current_time_ms / INPUT_FIELD_CURSOR_BLINK_INTERVAL_MS) % 2;
 
         if (cursor_visible) {
             // TODO: Рассчитать точную позицию X,Y курсора на основе input->cursor_pos и ширины символов
             // Пока просто рисуем вертикальную линию в начале
             float cursor_x = text_area_x; // + ширина текста до cursor_pos
             float cursor_y = text_area_y;
-            renderer_draw_quad(rend, cursor_x, cursor_y, 2.0f, 20.0f, 0xFF000000); // Черный курсор 2px шириной
+            renderer_draw_quad(renderer, cursor_x, cursor_y, INPUT_FIELD_CURSOR_WIDTH, 20.0f, INPUT_FIELD_CURSOR_COLOR);
         }
     }
 }
 
 
-// --- Кнопка ---
+// --- ButtonState ---
 
 int button_init(ButtonState* button, float x, float y, float width, float height, const char* label) {
     if (!button) {
@@ -319,6 +311,7 @@ int button_handle_click(ButtonState* button, float mouse_x, float mouse_y) {
         return 0;
     }
 
+    int was_pressed = button->is_pressed;
     // Проверяем, попал ли клик в область кнопки
     if (mouse_x >= button->x && mouse_x <= button->x + button->width &&
         mouse_y >= button->y && mouse_y <= button->y + button->height) {
@@ -328,30 +321,28 @@ int button_handle_click(ButtonState* button, float mouse_x, float mouse_y) {
     } else {
         button->is_pressed = 0; // Сбрасываем состояние, если клик вне кнопки
     }
-    return 0; // Кнопка не была нажата
+    return (was_pressed != button->is_pressed) ? 1 : 0; // Вернуть 1, если состояние изменилось
 }
 
-void button_render(const ButtonState* button, void* renderer) {
+void button_render(const ButtonState* button, Renderer* renderer) {
     if (!button || !renderer) {
         return;
     }
 
-    Renderer* rend = (Renderer*)renderer;
-
     // 1. Определяем цвет в зависимости от состояния
-    uint32_t bg_color = 0xFFDDDDDD; // Светло-серый по умолчанию
-    uint32_t text_color = 0xFF000000; // Черный текст
+    uint32_t bg_color = MENU_BUTTON_BACKGROUND_COLOR_DEFAULT; // Светло-серый по умолчанию
+    uint32_t text_color = MENU_BUTTON_TEXT_COLOR; // Черный текст
     if (button->is_pressed) {
-        bg_color = 0xFFAAAAAA; // Темнее при нажатии
+        bg_color = MENU_BUTTON_BACKGROUND_COLOR_PRESSED; // Темнее при нажатии
     } else if (button->is_hovered) {
-        bg_color = 0xFFEEEEEE; // Светлее при наведении (если будет реализовано)
+        bg_color = MENU_BUTTON_BACKGROUND_COLOR_HOVER; // Светлее при наведении (если будет реализовано)
     }
 
     // 2. Отрисовка фона кнопки
-    renderer_draw_quad(rend, button->x, button->y, button->width, button->height, bg_color);
+    renderer_draw_quad(renderer, button->x, button->y, button->width, button->height, bg_color);
 
-    // 3. Отрисовка рамки кнопки (можно сделать более сложную, с тенями)
-    renderer_draw_quad(rend, button->x, button->y, button->width, button->height, 0xFF888888); // Серая рамка
+    // 3. Отрисовка рамки кнопки
+    renderer_draw_quad(renderer, button->x, button->y, button->width, button->height, MENU_BUTTON_BORDER_COLOR); // Серая рамка
 
     // 4. Отрисовка текста по центру кнопки
     if (button->label && strlen(button->label) > 0) {
@@ -359,6 +350,6 @@ void button_render(const ButtonState* button, void* renderer) {
         // Пока просто рисуем в центре по X и немного ниже центра по Y
         float text_x = button->x + button->width / 2 - strlen(button->label) * 4.0f; // Грубая оценка ширины
         float text_y = button->y + button->height / 2 + 5.0f;
-        renderer_draw_text(rend, button->label, text_x, text_y, 1.0f, text_color, button->width);
+        renderer_draw_text(renderer, button->label, text_x, text_y, 1.0f, text_color, button->width);
     }
 }
