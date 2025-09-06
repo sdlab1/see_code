@@ -378,7 +378,7 @@ void app_set_diff_data(const DiffData* data) {
         // Копирование данных - это сложная операция, 
         // лучше передавать владение или использовать ссылки.
         // Пока просто заглушка.
-        log_warn("app_set_diff_data: Full data copy not implemented, using placeholder logic.");
+        log_warn("app_set_diff_ Full data copy not implemented, using placeholder logic.");
     }
     g_app.needs_redraw = 1;
     pthread_mutex_unlock(&g_app.state_mutex);
