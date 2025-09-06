@@ -40,4 +40,9 @@ extern const char* gl_shaders_solid_vertex_shader_source;
 extern const char* gl_shaders_solid_fragment_shader_source;
 // --- End predefined shaders ---
 
+// Helper functions for global shader resources
+GLuint gl_shaders_get_solid_program(void);
+GLuint gl_primitives_get_solid_vbo(void); 
+void gl_shaders_cleanup(void);
+
 #endif // SEE_CODE_GL_SHADERS_H
