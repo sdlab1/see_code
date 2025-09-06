@@ -34,4 +34,16 @@
 // --- Max Message Size ---
 #define MAX_MESSAGE_SIZE (50 * 1024 * 1024) // 50MB
 
+typedef struct {
+    const char* socket_path;
+    int window_width;
+    int window_height;
+    int landscape_mode;
+    int verbose;
+    int debug;
+} AppConfig;
+
+#define LOG_FILE_PATH "/data/data/com.termux/files/usr/tmp/see_code.log"
+#define LOG_BUFFER_SIZE 1024
+
 #endif // SEE_CODE_CONFIG_H
