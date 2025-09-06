@@ -46,19 +46,19 @@ static int is_text_renderer_usable(const Renderer* renderer) {
     if (!renderer) {
         return 0; // Нет рендерера - нет текста
     }
-
+    
     // Получаем указатель на внутренние данные текстового рендерера.
     // Предполагается, что renderer->text_internal_data_private указывает на структуру,
     // определенную в renderer.c/text_renderer.c, например, TextRendererInternalData.
     // Эта структура должна содержать флаг is_freetype_initialized.
     void* text_internal_data = renderer->text_internal_data_private;
-
+    
     if (text_internal_data) {
         // Приводим к предполагаемому типу. Нужно убедиться, что это соответствует реальной структуре.
         // Если структура называется иначе, нужно изменить.
         // Из prompt (20).txt видно, что структура называется TextRendererInternalData
         struct TextRendererInternalData* tr_data = (struct TextRendererInternalData*)text_internal_data;
-
+        
         // Проверяем флаг, установленный в text_renderer_init.
         // Если is_freetype_initialized == 1, значит FreeType был успешно инициализирован
         // с каким-либо шрифтом (основным или fallback).
@@ -102,10 +102,10 @@ static int app_init_internal(const AppConfig* config) {
 
     // --- ЛОГИКА ИНИЦИАЛИЗАЦИИ ГРАФИЧЕСКОЙ ПОДСИСТЕМЫ ---
     log_info("Attempting to initialize primary GLES2 renderer...");
-
+    
     // Попытка 1: Инициализация основного GLES2 рендерера
     g_app.renderer = renderer_create(config->window_width, config->window_height);
-
+    
     if (g_app.renderer) {
         // GLES2 рендерер был создан. Теперь проверим, можно ли с ним рисовать текст.
         if (is_text_renderer_usable(g_app.renderer)) {
@@ -137,7 +137,7 @@ static int app_init_internal(const AppConfig* config) {
         log_warn("Failed to initialize primary GLES2 renderer.");
         // Переходим к попытке Termux-GUI
     }
-
+    
     // --- ПОПЫТКА ИНИЦИАЛИЗАЦИИ TERMUX-GUI КАК КРИТИЧЕСКОЙ АЛЬТЕРНАТИВЫ ---
     log_info("Attempting Termux-GUI as critical fallback...");
     if (termux_gui_backend_is_available()) {
@@ -146,7 +146,7 @@ static int app_init_internal(const AppConfig* config) {
         if (g_app.termux_backend) {
             if (termux_gui_backend_init(g_app.termux_backend)) {
                 log_info("Termux GUI backend initialized successfully.");
-                // Termux-GUI удался, создаем UI manager с NULL
+                // Termux-GUI удался, создаем UI manager с NULL 
                 // (ui_manager_create должен переключиться на fallback).
                 g_app.ui_manager = ui_manager_create(NULL);
                 if (!g_app.ui_manager) {
@@ -172,13 +172,13 @@ static int app_init_internal(const AppConfig* config) {
         log_info("Termux-GUI library is not available.");
         // Переходим к финальному этапу ошибки
     }
-
+    
     // --- ФИНАЛЬНЫЙ ЭТАП ОШИБКИ ---
     log_error("CRITICAL: Failed to initialize any usable rendering system (GLES2 with text or Termux-GUI). Cannot proceed.");
     goto cleanup; // Переход к cleanup в случае критической ошибки
 
 renderer_success:
-    // Этот блок достигается, если один из рендереров
+    // Этот блок достигается, если один из рендереров 
     // (GLES2 с текстом или Termux-GUI) успешно инициализирован
     // и g_app.ui_manager создан.
     log_info("Renderer (either GLES2+Text or Termux-GUI) and UI Manager initialized successfully.");
@@ -212,14 +212,14 @@ renderer_success:
 // Метка для освобождения ресурсов в случае ошибки
 cleanup:
     log_warn("Cleaning up resources due to initialization failure...");
-
+    
     // Освобождаем ресурсы в порядке, обратном созданию
     if (g_app.socket_server) {
         socket_server_stop(g_app.socket_server); // Останавливаем сервер
         socket_server_destroy(g_app.socket_server); // Уничтожаем сервер
         g_app.socket_server = NULL;
     }
-
+    
     // Если поток был создан, ждем его завершения
     if (g_app.socket_thread) {
          // Отменяем поток, если он еще работает
@@ -229,32 +229,32 @@ cleanup:
          pthread_join(g_app.socket_thread, NULL);
          g_app.socket_thread = 0;
     }
-
+    
     if (g_app.ui_manager) {
         ui_manager_destroy(g_app.ui_manager);
         g_app.ui_manager = NULL;
     }
-
+    
     // Уничтожаем рендерер, если он был создан, но не подошел
     if (g_app.renderer) {
         renderer_destroy(g_app.renderer);
         g_app.renderer = NULL;
     }
-
+    
     // Уничтожаем backend Termux-GUI, если он был создан, но не подошел
     if (g_app.termux_backend) {
         termux_gui_backend_destroy(g_app.termux_backend);
         g_app.termux_backend = NULL;
     }
-
+    
     if (g_app.diff_data) {
         diff_data_destroy(g_app.diff_data);
         g_app.diff_data = NULL;
     }
-
+    
     // Уничтожаем мьютекс
     pthread_mutex_destroy(&g_app.state_mutex);
-
+    
     // Полная очистка состояния
     memset(&g_app, 0, sizeof(g_app));
     log_error("Application initialization failed and resources cleaned up.");
@@ -359,13 +359,13 @@ int app_render() {
     if (current_renderer_type == RENDERER_TYPE_GLES2) {
         if (g_app.renderer && g_app.ui_manager) {
             renderer_begin_frame(g_app.renderer);
-
+            
             // Рендерим UI
             ui_manager_render(g_app.ui_manager);
-
+            
             // Рендерим виджеты (если они будут добавлены)
             // widgets_render(...);
-
+            
             frame_rendered = renderer_end_frame(g_app.renderer);
         }
     } else if (current_renderer_type == RENDERER_TYPE_TERMUX_GUI) {
@@ -384,6 +384,7 @@ int app_render() {
 }
 
 // --- Обработка ввода ---
+// --- ОБНОВЛЕННАЯ ФУНКЦИЯ ОБРАБОТКИ КЛАВИШ ---
 void app_handle_key(int key_code) {
     if (!g_app.initialized || !g_app.running) {
         return;
@@ -391,12 +392,14 @@ void app_handle_key(int key_code) {
 
     pthread_mutex_lock(&g_app.state_mutex);
     // Передаем событие в UI manager
+    // Теперь ui_manager_handle_key должен обрабатывать ввод для виджетов
     if (g_app.ui_manager) {
         ui_manager_handle_key(g_app.ui_manager, key_code);
         g_app.needs_redraw = 1;
     }
     pthread_mutex_unlock(&g_app.state_mutex);
 }
+// --- КОНЕЦ ОБНОВЛЕННОЙ ФУНКЦИИ ---
 
 void app_handle_scroll(float delta_y) {
     if (!g_app.initialized || !g_app.running) {
@@ -436,7 +439,7 @@ void app_set_diff_data(const DiffData* data) {
         // Предполагается, что diff_data_update или подобная функция существует
         // или мы очищаем и копируем. Пока используем очистку и загрузку.
         diff_data_clear(g_app.diff_data);
-        // Копирование данных - это сложная операция,
+        // Копирование данных - это сложная операция, 
         // лучше передавать владение или использовать ссылки.
         // Пока просто заглушка.
         log_warn("app_set_diff_data: Full data copy not implemented, using placeholder logic.");
@@ -455,12 +458,12 @@ const DiffData* app_get_diff_data() {
 static void* socket_thread_func(void* arg) {
     (void)arg; // Неиспользуемый параметр
     log_info("Socket server thread started");
-
+    
     // Запускаем цикл обработки соединений
     if (g_app.socket_server) {
         socket_server_run(g_app.socket_server);
     }
-
+    
     log_info("Socket server thread finished");
     return NULL;
 }
@@ -468,7 +471,7 @@ static void* socket_thread_func(void* arg) {
 // Callback, вызываемый сервером сокетов при получении данных
 static void on_socket_data(const char* data_buffer, size_t length) {
     log_info("Received %zu raw bytes from client", length);
-
+    
     pthread_mutex_lock(&g_app.state_mutex);
 
     // Загружаем данные из буфера с помощью парсера
