@@ -46,4 +46,24 @@ typedef struct {
 #define LOG_FILE_PATH "/data/data/com.termux/files/usr/tmp/see_code.log"
 #define LOG_BUFFER_SIZE 1024
 
+// --- UI Widget Configuration (New) ---
+// Текстовое поле ввода
+#define INPUT_FIELD_HEIGHT 60.0f // Примерно 3 строки
+#define INPUT_FIELD_PLACEHOLDER_TEXT "type here"
+#define INPUT_FIELD_PLACEHOLDER_COLOR 0xFF888888 // Серый
+#define INPUT_FIELD_TEXT_COLOR 0xFF000000       // Черный
+#define INPUT_FIELD_BACKGROUND_COLOR 0xFFFFFFFF // Белый
+#define INPUT_FIELD_BORDER_COLOR 0xFF888888     // Серый
+#define INPUT_FIELD_CURSOR_WIDTH 2.0f
+#define INPUT_FIELD_CURSOR_COLOR 0xFF000000     // Черный
+#define INPUT_FIELD_CURSOR_BLINK_INTERVAL_MS 500 // Миллисекунды
+
+// Кнопка меню "..."
+#define MENU_BUTTON_SIZE 40.0f
+#define MENU_BUTTON_LABEL "..."
+#define MENU_BUTTON_TEXT_COLOR 0xFF000000       // Черный
+#define MENU_BUTTON_BACKGROUND_COLOR_DEFAULT 0xFFDDDDDD // Светло-серый
+#define MENU_BUTTON_BACKGROUND_COLOR_HOVER 0xFFEEEEEE   // Еще светлее
+#define MENU_BUTTON_BACKGROUND_COLOR_PRESSED 0xFFAAAAAA // Темнее
+
 #endif // SEE_CODE_CONFIG_H
